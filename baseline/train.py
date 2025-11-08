@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -14,11 +15,11 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-from config import config
+from config import config, NRMSbertConfig
 from dataset import BaseDataset
-from evaluate import NewsDataset, evaluate
+from evaluate import NewsDataset, evaluate, EvaluationParams
 from model.NRMSbert import NRMSbert
-from utils import should_pin_memory
+from utils import get_device, should_pin_memory, should_display_progress
 
 # Setup logging
 logging.basicConfig(
@@ -28,9 +29,25 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def should_display_progress() -> bool:
-    """Check if progress bars should be displayed."""
-    return sys.stdout.isatty()
+@dataclass
+class TrainingContext:
+    """Context object holding high-level training state."""
+    config: NRMSbertConfig
+    device: torch.device
+    model: NRMSbert
+    train_dataset: BaseDataset
+    val_dataset: NewsDataset
+    dataloader: DataLoader
+    criterion: nn.Module
+    optimizer: torch.optim.Optimizer
+    writer: SummaryWriter
+    start_time: float
+    early_stopping: 'EarlyStopping'
+    
+    @property
+    def batches_per_epoch(self) -> int:
+        """Calculate batches per epoch."""
+        return len(self.train_dataset) // self.config.batch_size
 
 
 def time_since(since: float) -> str:
@@ -129,64 +146,63 @@ def create_dataloader(dataset: BaseDataset, shuffle: bool = True) -> DataLoader:
     )
 
 
-def train_step(model: NRMSbert, minibatch: dict, criterion: nn.Module, optimizer: torch.optim.Optimizer, device: torch.device) -> float:
+def train_step(ctx: TrainingContext, minibatch: dict) -> float:
     """Perform a single training step.
     
     Args:
-        model: Model instance
+        ctx: Training context
         minibatch: Batch of training data
-        criterion: Loss function
-        optimizer: Optimizer instance
-        device: Device to run on
         
     Returns:
         Loss value
     """
     # Forward pass
-    y_pred = model(
+    y_pred = ctx.model(
         minibatch["candidate_news"],
         minibatch["clicked_news"],
         minibatch["clicked_news_mask"]
     )
     
     # Compute loss (first item is positive, rest are negative)
-    y_true = torch.zeros(len(y_pred), dtype=torch.long, device=device)
-    loss = criterion(y_pred, y_true)
+    y_true = torch.zeros(len(y_pred), dtype=torch.long, device=ctx.device)
+    loss = ctx.criterion(y_pred, y_true)
     
     # Backward pass
-    optimizer.zero_grad()
+    ctx.optimizer.zero_grad()
     loss.backward()
-    optimizer.step()
+    ctx.optimizer.step()
     
     return loss.item()
 
 
-def validate(model: NRMSbert, val_data_path: Path, evaluate_dataset: NewsDataset, max_count: int = 200000) -> Tuple[float, float, float, float]:
+def validate(ctx: TrainingContext) -> Tuple[float, float, float, float]:
     """Validate model on validation set.
     
     Args:
-        model: Model instance
-        val_data_path: Path to validation data directory
-        evaluate_dataset: Pre-loaded news dataset
-        max_count: Maximum number of samples to evaluate
+        ctx: Training context
         
     Returns:
         Tuple of (AUC, MRR, nDCG@5, nDCG@10)
     """
-    model.eval()
+    ctx.model.eval()
     val_auc, val_mrr, val_ndcg5, val_ndcg10 = evaluate(
-        model, str(val_data_path), config.num_workers, evaluate_dataset, max_count
+        ctx.model,
+        EvaluationParams(
+            directory=str(ctx.config.val_data_path),
+            num_workers=ctx.config.num_workers,
+            news_dataset_built=ctx.val_dataset,
+            max_count=ctx.config.max_validation_samples
+        )
     )
-    model.train()
+    ctx.model.train()
     return val_auc, val_mrr, val_ndcg5, val_ndcg10
 
 
-def save_checkpoint(model: NRMSbert, optimizer: torch.optim.Optimizer, step: int, val_auc: float, checkpoint_path: Path) -> None:
+def save_checkpoint(ctx: TrainingContext, step: int, val_auc: float, checkpoint_path: Path) -> None:
     """Save model checkpoint.
     
     Args:
-        model: Model instance
-        optimizer: Optimizer instance
+        ctx: Training context
         step: Current training step
         val_auc: Validation AUC score
         checkpoint_path: Path to save checkpoint
@@ -194,8 +210,8 @@ def save_checkpoint(model: NRMSbert, optimizer: torch.optim.Optimizer, step: int
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
+            'model_state_dict': ctx.model.state_dict(),
+            'optimizer_state_dict': ctx.optimizer.state_dict(),
             'step': step,
             'val_auc': val_auc,
         },
@@ -203,31 +219,32 @@ def save_checkpoint(model: NRMSbert, optimizer: torch.optim.Optimizer, step: int
     )
 
 
-def load_checkpoint(model: NRMSbert, checkpoint_path: Path) -> dict:
+def load_checkpoint(ctx: TrainingContext, checkpoint_path: Path) -> dict:
     """Load model checkpoint.
     
     Args:
-        model: Model instance
+        ctx: Training context
         checkpoint_path: Path to checkpoint file
         
     Returns:
         Checkpoint dictionary
     """
     checkpoint = torch.load(checkpoint_path)
-    model.load_state_dict(checkpoint['model_state_dict'])
+    ctx.model.load_state_dict(checkpoint['model_state_dict'])
     return checkpoint
 
 
-def train() -> None:
-    """Main training function."""
+def setup_training_context(cfg: NRMSbertConfig) -> TrainingContext:
+    """Setup and initialize training context.
+    
+    Args:
+        cfg: Configuration object
+        
+    Returns:
+        Initialized training context
+    """
     start_time = time.time()
-    # Auto-detect device: prefer CUDA, then MPS, then CPU
-    if torch.cuda.is_available():
-        device = torch.device("cuda:0")
-    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-        device = torch.device("mps")
-    else:
-        device = torch.device("cpu")
+    device = get_device()
     
     # Setup logging
     log_dir = Path("./runs/NRMSbert") / datetime.datetime.now().replace(microsecond=0).isoformat()
@@ -236,7 +253,7 @@ def train() -> None:
     writer = SummaryWriter(log_dir=str(log_dir))
     
     # Setup checkpoint directory
-    config.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    cfg.checkpoint_dir.mkdir(parents=True, exist_ok=True)
     
     # Load model
     logger.info("Loading model...")
@@ -248,15 +265,18 @@ def train() -> None:
     logger.info("Loading training data...")
     logger.info(f"Time elapsed: {time_since(start_time)}")
     train_dataset = BaseDataset(
-        config.train_data_path / 'behaviors_parsed.tsv',
-        config.train_data_path / 'news_parsed.tsv'
+        cfg.train_data_path / 'behaviors_parsed.tsv',
+        cfg.train_data_path / 'news_parsed.tsv'
     )
-    logger.info(f"Loaded training dataset with size {len(train_dataset)}.")
+    dataset_size = len(train_dataset)
+    batches_per_epoch = dataset_size // cfg.batch_size
+    logger.info(f"Loaded training dataset with size {dataset_size:,}.")
+    logger.info(f"Batches per epoch: {batches_per_epoch:,} (batch_size={cfg.batch_size})")
     logger.info(f"Time elapsed: {time_since(start_time)}")
     
     logger.info("Loading validation data...")
     logger.info(f"Time elapsed: {time_since(start_time)}")
-    val_dataset = NewsDataset(config.val_data_path / 'news_parsed.tsv')
+    val_dataset = NewsDataset(cfg.val_data_path / 'news_parsed.tsv')
     logger.info("Finished loading validation data.")
     logger.info(f"Time elapsed: {time_since(start_time)}")
     
@@ -267,35 +287,57 @@ def train() -> None:
     logger.info("Finished building data loader.")
     logger.info(f"Time elapsed: {time_since(start_time)}")
     
-    # Setup training
+    # Setup training components
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
     early_stopping = EarlyStopping(patience=5)
     
-    # Training loop
+    return TrainingContext(
+        config=cfg,
+        device=device,
+        model=model,
+        train_dataset=train_dataset,
+        val_dataset=val_dataset,
+        dataloader=dataloader,
+        criterion=criterion,
+        optimizer=optimizer,
+        writer=writer,
+        start_time=start_time,
+        early_stopping=early_stopping
+    )
+
+
+def run_training_loop(ctx: TrainingContext) -> Tuple[int, Optional[Path], int]:
+    """Run the main training loop.
+    
+    Args:
+        ctx: Training context
+        
+    Returns:
+        Tuple of (final_batch_idx, best_checkpoint_path, best_step)
+    """
     loss_history = []
     exhaustion_count = 0
     step = 0
     best_step = 0
     best_checkpoint_path: Optional[Path] = None
-    best_val_auc = float('-inf')
     
     # Determine total batches
-    if config.test_run:
+    if ctx.config.test_run:
         total_batches = 10
         logger.info("TEST RUN MODE: Training for 10 batches only")
-    elif config.max_batches is not None:
-        total_batches = config.max_batches
+    elif ctx.config.max_batches is not None:
+        total_batches = ctx.config.max_batches
         logger.info(f"Limited training: Training for {total_batches} batches")
     else:
-        total_batches = config.num_epochs * len(train_dataset) // config.batch_size + 1
+        total_batches = ctx.config.num_epochs * len(ctx.train_dataset) // ctx.config.batch_size + 1
     
     progress = tqdm(range(1, total_batches + 1), desc="Training") if should_display_progress() else range(1, total_batches + 1)
     
     logger.info("Starting training...")
-    logger.info(f"Time elapsed: {time_since(start_time)}")
+    logger.info(f"Time elapsed: {time_since(ctx.start_time)}")
     
-    dataloader_iter = iter(dataloader)
+    dataloader_iter = iter(ctx.dataloader)
     
     for batch_idx in progress:
         # Get next batch (recreate dataloader if exhausted)
@@ -307,87 +349,125 @@ def train() -> None:
                 tqdm.write(
                     f"Training data exhausted {exhaustion_count} times after {batch_idx} batches, reusing dataset."
                 )
-            dataloader_iter = iter(dataloader)
+            dataloader_iter = iter(ctx.dataloader)
             minibatch = next(dataloader_iter)
         
         step += 1
         
         # Training step
-        loss = train_step(model, minibatch, criterion, optimizer, device)
+        loss = train_step(ctx, minibatch)
         loss_history.append(loss)
         
         # Logging
-        if batch_idx % 10 == 0:
-            writer.add_scalar('Train/Loss', loss, step)
-        
-        if batch_idx % config.num_batches_show_loss == 0:
-            avg_loss = np.mean(loss_history)
-            recent_avg_loss = np.mean(loss_history[-256:]) if len(loss_history) >= 256 else avg_loss
-            message = (
-                f"Time {time_since(start_time)}, batches {batch_idx}, "
-                f"current loss {loss:.4f}, average loss: {avg_loss:.4f}, "
-                f"recent average loss: {recent_avg_loss:.4f}"
-            )
-            if should_display_progress():
-                tqdm.write(message)
-            else:
-                logger.info(message)
+        log_training_progress(ctx, batch_idx, step, loss, loss_history)
         
         # Validation
-        # For test runs, validate every batch; otherwise use normal frequency
-        validate_frequency = 1 if config.test_run else config.num_batches_validate
+        validate_frequency = 1 if ctx.config.test_run else ctx.config.num_batches_validate
         if batch_idx % validate_frequency == 0:
-            val_auc, val_mrr, val_ndcg5, val_ndcg10 = validate(
-                model, config.val_data_path, val_dataset, max_count=config.max_validation_samples
-            )
-            
-            writer.add_scalar('Validation/AUC', val_auc, step)
-            writer.add_scalar('Validation/MRR', val_mrr, step)
-            writer.add_scalar('Validation/nDCG@5', val_ndcg5, step)
-            writer.add_scalar('Validation/nDCG@10', val_ndcg10, step)
-            
-            message = (
-                f"\nTime {time_since(start_time)}, batches {batch_idx}, "
-                f"validation AUC: {val_auc:.4f}, MRR: {val_mrr:.4f}, "
-                f"nDCG@5: {val_ndcg5:.4f}, nDCG@10: {val_ndcg10:.4f}"
-            )
-            if should_display_progress():
-                tqdm.write(message)
-            else:
-                print(message)
-            
-            # Early stopping check
-            early_stop, improved = early_stopping(-val_auc)
-            if early_stop:
-                message = 'Early stopping triggered.'
-                if should_display_progress():
-                    tqdm.write(message)
-                else:
-                    logger.info(message)
+            should_stop, improved, checkpoint_path = run_validation(ctx, batch_idx, step)
+            if should_stop:
                 break
             
-            # Save best checkpoint
             if improved:
                 best_step = step
                 if best_checkpoint_path and best_checkpoint_path.exists():
                     best_checkpoint_path.unlink()
-                
-                best_checkpoint_path = config.checkpoint_dir / f'ckpt-{step}.pth'
-                save_checkpoint(model, optimizer, step, val_auc, best_checkpoint_path)
-                best_val_auc = val_auc
+                best_checkpoint_path = checkpoint_path
+    
+    return batch_idx, best_checkpoint_path, best_step
+
+
+def log_training_progress(ctx: TrainingContext, batch_idx: int, step: int, loss: float, loss_history: list) -> None:
+    """Log training progress.
+    
+    Args:
+        ctx: Training context
+        batch_idx: Current batch index
+        step: Current training step
+        loss: Current loss value
+        loss_history: History of loss values
+    """
+    if batch_idx % 10 == 0:
+        ctx.writer.add_scalar('Train/Loss', loss, step)
+    
+    if batch_idx % ctx.config.num_batches_show_loss == 0:
+        avg_loss = np.mean(loss_history)
+        recent_avg_loss = np.mean(loss_history[-256:]) if len(loss_history) >= 256 else avg_loss
+        message = (
+            f"Time {time_since(ctx.start_time)}, batches {batch_idx}, "
+            f"current loss {loss:.4f}, average loss: {avg_loss:.4f}, "
+            f"recent average loss: {recent_avg_loss:.4f}"
+        )
+        if should_display_progress():
+            tqdm.write(message)
+        else:
+            logger.info(message)
+
+
+def run_validation(ctx: TrainingContext, batch_idx: int, step: int) -> Tuple[bool, bool, Optional[Path]]:
+    """Run validation and handle checkpointing.
+    
+    Args:
+        ctx: Training context
+        batch_idx: Current batch index
+        step: Current training step
+        
+    Returns:
+        Tuple of (should_stop, improved, checkpoint_path)
+    """
+    val_auc, val_mrr, val_ndcg5, val_ndcg10 = validate(ctx)
+    
+    ctx.writer.add_scalar('Validation/AUC', val_auc, step)
+    ctx.writer.add_scalar('Validation/MRR', val_mrr, step)
+    ctx.writer.add_scalar('Validation/nDCG@5', val_ndcg5, step)
+    ctx.writer.add_scalar('Validation/nDCG@10', val_ndcg10, step)
+    
+    message = (
+        f"\nTime {time_since(ctx.start_time)}, batches {batch_idx}, "
+        f"validation AUC: {val_auc:.4f}, MRR: {val_mrr:.4f}, "
+        f"nDCG@5: {val_ndcg5:.4f}, nDCG@10: {val_ndcg10:.4f}"
+    )
+    if should_display_progress():
+        tqdm.write(message)
+    else:
+        print(message)
+    
+    # Early stopping check
+    early_stop, improved = ctx.early_stopping(-val_auc)
+    if early_stop:
+        message = 'Early stopping triggered.'
+        if should_display_progress():
+            tqdm.write(message)
+        else:
+            logger.info(message)
+        return True, False, None
+    
+    # Save best checkpoint
+    checkpoint_path = None
+    if improved:
+        checkpoint_path = ctx.config.checkpoint_dir / f'ckpt-{step}.pth'
+        save_checkpoint(ctx, step, val_auc, checkpoint_path)
+    
+    return False, improved, checkpoint_path
+
+
+def train() -> None:
+    """Main training function."""
+    ctx = setup_training_context(config)
+    
+    # Run training loop
+    final_batch_idx, best_checkpoint_path, best_step = run_training_loop(ctx)
     
     # Load best checkpoint and evaluate
     if best_checkpoint_path and best_checkpoint_path.exists():
         logger.info(f"Loading best checkpoint from step {best_step}...")
-        load_checkpoint(model, best_checkpoint_path)
+        load_checkpoint(ctx, best_checkpoint_path)
     
-    model.eval()
-    final_auc, final_mrr, final_ndcg5, final_ndcg10 = validate(
-        model, config.val_data_path, val_dataset, max_count=config.max_validation_samples
-    )
+    ctx.model.eval()
+    final_auc, final_mrr, final_ndcg5, final_ndcg10 = validate(ctx)
     
     message = (
-        f"\n\nTime {time_since(start_time)}, batches {batch_idx}, "
+        f"\n\nTime {time_since(ctx.start_time)}, batches {final_batch_idx}, "
         f"Final AUC: {final_auc:.4f}, Final MRR: {final_mrr:.4f}, "
         f"Final nDCG@5: {final_ndcg5:.4f}, Final nDCG@10: {final_ndcg10:.4f}"
     )
@@ -398,13 +478,7 @@ def train() -> None:
 
 
 if __name__ == '__main__':
-    # Auto-detect device: prefer CUDA, then MPS, then CPU
-    if torch.cuda.is_available():
-        device = torch.device("cuda:0")
-    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-        device = torch.device("mps")
-    else:
-        device = torch.device("cpu")
+    device = get_device()
     logger.info(f'Using device: {device}')
     logger.info('Training NRMSbert model')
     train()

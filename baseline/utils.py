@@ -1,5 +1,6 @@
 """Utility functions for NRMSbert model."""
 import pickle
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,22 @@ def load_news_dataset(file_path: Path | str) -> Any:
         return pickle.load(f)
 
 
+def get_device() -> torch.device:
+    """Auto-detect and return the best available device.
+    
+    Prefers CUDA, then MPS, then CPU.
+    
+    Returns:
+        torch.device instance
+    """
+    if torch.cuda.is_available():
+        return torch.device("cuda:0")
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
+
+
 def should_pin_memory(device: torch.device | None = None) -> bool:
     """Determine if pin_memory should be enabled for DataLoader.
     
@@ -43,13 +60,7 @@ def should_pin_memory(device: torch.device | None = None) -> bool:
         True if pin_memory should be enabled (CUDA), False otherwise (MPS/CPU)
     """
     if device is None:
-        # Auto-detect: prefer CUDA, then MPS, then CPU
-        if torch.cuda.is_available():
-            return True  # CUDA supports pin_memory
-        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            return False  # MPS doesn't support pin_memory
-        else:
-            return False  # CPU doesn't benefit from pin_memory
+        device = get_device()
     
     # Check device type
     if device.type == 'cuda':
@@ -58,3 +69,12 @@ def should_pin_memory(device: torch.device | None = None) -> bool:
         return False
     else:
         return False
+
+
+def should_display_progress() -> bool:
+    """Check if progress bars should be displayed.
+    
+    Returns:
+        True if output is a TTY, False otherwise
+    """
+    return sys.stdout.isatty()

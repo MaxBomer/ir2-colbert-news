@@ -2,6 +2,7 @@
 import ast
 import logging
 import sys
+from dataclasses import dataclass
 from multiprocessing import Pool
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -16,7 +17,7 @@ from tqdm import tqdm
 
 from config import config
 from model.NRMSbert import NRMSbert
-from utils import load_news_dataset, save_news_dataset, should_pin_memory
+from utils import load_news_dataset, save_news_dataset, should_pin_memory, get_device, should_display_progress
 
 # Setup logging
 logging.basicConfig(
@@ -281,21 +282,28 @@ class BehaviorsDataset(Dataset):
         }
 
 
-def compute_news_vectors(model: NRMSbert, news_dataset: NewsDataset, device: torch.device, batch_size_multiplier: int = 16) -> Dict[str, torch.Tensor]:
+@dataclass
+class EvaluationConfig:
+    """Configuration for evaluation."""
+    batch_size_multiplier: int = 16
+    max_count: int = sys.maxsize
+
+
+def compute_news_vectors(model: NRMSbert, news_dataset: NewsDataset, device: torch.device, eval_config: EvaluationConfig) -> Dict[str, torch.Tensor]:
     """Compute news article vectors.
     
     Args:
         model: Model instance
         news_dataset: News dataset
         device: Device to run on
-        batch_size_multiplier: Multiplier for batch size
+        eval_config: Evaluation configuration
         
     Returns:
         Dictionary mapping news IDs to vectors
     """
     news_dataloader = DataLoader(
         news_dataset,
-        batch_size=config.batch_size * batch_size_multiplier,
+        batch_size=config.batch_size * eval_config.batch_size_multiplier,
         shuffle=False,
         num_workers=config.num_workers,
         drop_last=False,
@@ -337,7 +345,7 @@ def compute_news_vectors(model: NRMSbert, news_dataset: NewsDataset, device: tor
     return news2vector
 
 
-def compute_user_vectors(model: NRMSbert, user_dataset: UserDataset, news2vector: Dict[str, torch.Tensor], device: torch.device, batch_size_multiplier: int = 16) -> Dict[str, torch.Tensor]:
+def compute_user_vectors(model: NRMSbert, user_dataset: UserDataset, news2vector: Dict[str, torch.Tensor], device: torch.device, eval_config: EvaluationConfig) -> Dict[str, torch.Tensor]:
     """Compute user vectors from click histories.
     
     Args:
@@ -345,14 +353,14 @@ def compute_user_vectors(model: NRMSbert, user_dataset: UserDataset, news2vector
         user_dataset: User dataset
         news2vector: Dictionary mapping news IDs to vectors
         device: Device to run on
-        batch_size_multiplier: Multiplier for batch size
+        eval_config: Evaluation configuration
         
     Returns:
         Dictionary mapping user strings to vectors
     """
     user_dataloader = DataLoader(
         user_dataset,
-        batch_size=config.batch_size * batch_size_multiplier,
+        batch_size=config.batch_size * eval_config.batch_size_multiplier,
         shuffle=False,
         num_workers=config.num_workers,
         drop_last=False,
@@ -382,31 +390,38 @@ def compute_user_vectors(model: NRMSbert, user_dataset: UserDataset, news2vector
     return user2vector
 
 
+@dataclass
+class EvaluationParams:
+    """Parameters for evaluation function."""
+    directory: Path | str
+    num_workers: int
+    news_dataset_built: Optional[NewsDataset] = None
+    max_count: int = sys.maxsize
+
+
 @torch.no_grad()
-def evaluate(model: NRMSbert, directory: Path | str, num_workers: int, news_dataset_built: Optional[NewsDataset] = None, max_count: int = sys.maxsize) -> Tuple[float, float, float, float]:
+def evaluate(model: NRMSbert, params: EvaluationParams) -> Tuple[float, float, float, float]:
     """Evaluate model on target directory.
     
     Args:
         model: Model to be evaluated
-        directory: Directory containing behaviors.tsv and news_parsed.tsv
-        num_workers: Number of worker processes for metric calculation
-        news_dataset_built: Pre-built news dataset (optional)
-        max_count: Maximum number of samples to evaluate
+        params: Evaluation parameters
         
     Returns:
         Tuple of (AUC, MRR, nDCG@5, nDCG@10)
     """
     device = next(model.parameters()).device
-    directory = Path(directory)
+    directory = Path(params.directory)
+    eval_config = EvaluationConfig(max_count=params.max_count)
     
     # Load or use provided news dataset
-    if news_dataset_built is not None:
-        news_dataset = news_dataset_built
+    if params.news_dataset_built is not None:
+        news_dataset = params.news_dataset_built
     else:
         news_dataset = NewsDataset(directory / 'news_parsed.tsv')
     
     # Compute news vectors
-    news2vector = compute_news_vectors(model, news_dataset, device)
+    news2vector = compute_news_vectors(model, news_dataset, device, eval_config)
     
     # Load user dataset
     user_dataset = UserDataset(
@@ -415,7 +430,7 @@ def evaluate(model: NRMSbert, directory: Path | str, num_workers: int, news_data
     )
     
     # Compute user vectors
-    user2vector = compute_user_vectors(model, user_dataset, news2vector, device)
+    user2vector = compute_user_vectors(model, user_dataset, news2vector, device, eval_config)
     
     # Load behaviors dataset
     behaviors_dataset = BehaviorsDataset(directory / 'behaviors.tsv')
@@ -431,7 +446,7 @@ def evaluate(model: NRMSbert, directory: Path | str, num_workers: int, news_data
     progress = tqdm(behaviors_dataloader, desc="Computing predictions") if should_display_progress() else behaviors_dataloader
     
     for count, minibatch in enumerate(progress, 1):
-        if count > max_count:
+        if count > params.max_count:
             break
         
         user_string = minibatch['clicked_news_string'][0]
@@ -455,7 +470,7 @@ def evaluate(model: NRMSbert, directory: Path | str, num_workers: int, news_data
         tasks.append((y_true, y_pred))
     
     # Calculate metrics in parallel
-    with Pool(processes=num_workers) as pool:
+    with Pool(processes=params.num_workers) as pool:
         results = pool.map(calculate_single_user_metric, tasks)
     
     aucs, mrrs, ndcg5s, ndcg10s = np.array(results).T
@@ -499,13 +514,7 @@ def find_latest_checkpoint(checkpoint_dir: Path) -> Optional[Path]:
 
 
 if __name__ == '__main__':
-    # Auto-detect device: prefer CUDA, then MPS, then CPU
-    if torch.cuda.is_available():
-        device = torch.device("cuda:0")
-    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-        device = torch.device("mps")
-    else:
-        device = torch.device("cpu")
+    device = get_device()
     logger.info(f'Using device: {device}')
     logger.info('Evaluating NRMSbert model')
     
@@ -524,11 +533,11 @@ if __name__ == '__main__':
     model.eval()
     
     # Evaluate on test set
-    auc, mrr, ndcg5, ndcg10 = evaluate(
-        model,
-        config.test_data_path,
-        config.num_workers
+    params = EvaluationParams(
+        directory=config.test_data_path,
+        num_workers=config.num_workers
     )
+    auc, mrr, ndcg5, ndcg10 = evaluate(model, params)
     
     print(
         f'AUC: {auc:.4f}\nMRR: {mrr:.4f}\nnDCG@5: {ndcg5:.4f}\nnDCG@10: {ndcg10:.4f}'
