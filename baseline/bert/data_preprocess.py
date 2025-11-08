@@ -7,6 +7,7 @@ from tqdm import tqdm
 from os import path
 from pathlib import Path
 import random
+import nltk
 from nltk.tokenize import word_tokenize
 import numpy as np
 import csv
@@ -14,9 +15,18 @@ import importlib
 from utils import *
 from transformers import BertTokenizer
 import argparse
+import os
+
+os.environ.setdefault("NLTK_DATA", os.path.expanduser("~/nltk_data"))
+
+for resource in ("punkt", "punkt_tab"):
+    try:
+        nltk.data.find(f"tokenizers/{resource}")
+    except LookupError:
+        nltk.download(resource, quiet=True)
 
 parser = argparse.ArgumentParser(description="Set configuration for the model")
-parser.add_argument('--pretrained_model_name', type=str, default='DOWNLOAD_PATH/llms/bert-base-uncased',
+parser.add_argument('--pretrained_model_name', type=str, default='prajjwal1/bert-tiny',
                     help='pretrained model name')
 args = parser.parse_args()
 
@@ -254,9 +264,9 @@ def parse_news(source, target, category2int_path, word2int_path,
 
 
 if __name__ == '__main__':
-    train_dir = 'YOUR_FILE/data/original/train'
-    val_dir = 'YOUR_FILE/data/original/val'
-    test_dir = 'YOUR_FILE/data/original/test'
+    train_dir = 'baseline/data/train'
+    val_dir = 'baseline/data/val'
+    test_dir = 'baseline/data/test'
 
     print('Process data for training')
 
@@ -286,12 +296,13 @@ if __name__ == '__main__':
                path.join(train_dir, 'entity2int.tsv'),
                mode='test')
 
-    print('\nProcess data for test')
-
-    print('Parse news')
-    parse_news(path.join(test_dir, 'news.tsv'),
-               path.join(test_dir, 'news_parsed.tsv'),
-               path.join(train_dir, 'category2int.tsv'),
-               path.join(train_dir, 'word2int.tsv'),
-               path.join(train_dir, 'entity2int.tsv'),
-               mode='test')
+    test_news = path.join(test_dir, 'news.tsv')
+    if path.exists(test_dir) and path.exists(test_news):
+        print('\nProcess data for test')
+        print('Parse news')
+        parse_news(path.join(test_dir, 'news.tsv'),
+                path.join(test_dir, 'news_parsed.tsv'),
+                path.join(train_dir, 'category2int.tsv'),
+                path.join(train_dir, 'word2int.tsv'),
+                path.join(train_dir, 'entity2int.tsv'),
+                mode='test')

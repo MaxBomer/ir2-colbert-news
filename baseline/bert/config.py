@@ -1,7 +1,7 @@
 import os
 import argparse
 
-model_name = os.environ['MODEL_NAME'] if 'MODEL_NAME' in os.environ else 'NAML'
+model_name = os.environ['MODEL_NAME'] if 'MODEL_NAME' in os.environ else 'NRMSbert'
 
 # Currently included model
 assert model_name in [
@@ -28,7 +28,7 @@ parser.add_argument('--api_mode', type=str, default='llama3_attack_dpo_lora_1',
                     help='the specific name of api mode -> e.g., gpt-3.5-turbo, gpt-4 or llama3_attack_dpo_lora_1')
 parser.add_argument('--attack_mode', type=str, default='llm',
                     help='llm or Copycat, etc. ')
-parser.add_argument('--current_data_path', type=str, default='YOUR_FILE/data',
+parser.add_argument('--current_data_path', type=str, default='baseline',
                     help='llm or Copycat, etc. ')
 parser.add_argument('--attack_folder', type=str, default='YOUR_FILE/data/attack',
                     help='llm or Copycat, etc. ')
@@ -40,7 +40,7 @@ parser.add_argument('--topN', type=int, default=10,
                     help='Evaluate top N Rec Items')
 parser.add_argument('--pretrained_mode', type=str, default='bert',
                     help='text encoder for news recommender, could be (glove, bert, or llama)')
-parser.add_argument('--original_data_path', type=str, default='YOUR_FILE/data/original',
+parser.add_argument('--original_data_path', type=str, default='baseline/data_downsampled_20k',
                     help='model train data path')
 parser.add_argument('--word_embedding_dim', type=int, default=768,
                     help='golve - 300, bert - 768, llama - 4096')
@@ -60,7 +60,7 @@ parser.add_argument('--finetune_layers', type=int, default=1,
                     help='maximum 12 layers, But I clearly could not afford it.')
 parser.add_argument('--batch_size', type=int, default=64,
                     help='batch size')
-parser.add_argument('--pretrained_model_name', type=str, default='DOWNLOAD_PATH/llms/bert-base-uncased',
+parser.add_argument('--pretrained_model_name', type=str, default='prajjwal1/bert-tiny',
                     help='pretrained model name')
 args = parser.parse_args()
 
@@ -81,7 +81,7 @@ class BaseConfig():
     gpt4_attack_text_path = args.gpt4_attack_text_path
     original_data_path = args.original_data_path
     pretrained_mode = args.pretrained_mode
-    home_folder = '/data/YOUR_FILE/news_data'
+    home_folder = 'baseline/data_downsampled_20k/news_data'
     seed = 2024
     poisoning_ratio = 0.01
     attack_folder = args.attack_folder

@@ -1,0 +1,30 @@
+name: newsrec
+channels:
+  - defaults
+  - conda-forge
+  - pytorch
+  - huggingface
+
+dependencies:
+  - python=3.9
+  - pytorch
+  - torchvision
+  - cudatoolkit=11.7   
+  - numpy
+  - pandas
+  - scikit-learn
+  - tqdm
+  - nltk
+  - swifter
+  - pytorch-lightning
+  - pip
+  - pip:
+      - transformers
+      - datasets
+      - wandb
+      - tensorboard
+      - sentencepiece
+      - accelerate
+      - evaluate
+      - astor
+      - python-dotenv

@@ -5,3 +5,4 @@ outputs/
 .venv/
 .env
 
+job_scripts/out

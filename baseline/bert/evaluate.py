@@ -292,12 +292,12 @@ def evaluate_popular(model, directory, num_workers, news_dataset_built=None, max
                 for news_list in minibatch["clicked_news"]
             ], dim=0).transpose(0, 1)
             
-            if model_name in ['LSTUR', 'LSTURlinear', 'LSTURbert', 'LSTURllama']:
-                user_vector = model.get_user_vector(
-                    minibatch['user'], minibatch['clicked_news_length'], clicked_news_vector
-                )
-            else:
-                user_vector = model.get_user_vector(clicked_news_vector)
+            # if model_name in ['LSTUR', 'LSTURlinear', 'LSTURbert', 'LSTURllama']:
+            #     user_vector = model.get_user_vector(
+            #         minibatch['user'], minibatch['clicked_news_length'], clicked_news_vector
+            #     )
+            # else:
+            user_vector = model.get_user_vector(clicked_news_vector)
                 
             for user_string, vector in zip(user_strings, user_vector):
                 if user_string not in user2vector:

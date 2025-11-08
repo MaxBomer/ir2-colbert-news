@@ -1,0 +1,33 @@
+#!/bin/bash
+
+#SBATCH --partition=gpu_a100
+#SBATCH --gpus=1
+#SBATCH --job-name=TrainBaseline
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=9
+#SBATCH --time=20:00:00
+#SBATCH --output=./job_scripts/out/slurm_output_%A.out
+
+module purge
+module load 2025
+module load Anaconda3/2025.06-1
+
+source activate newsrec
+
+export MODEL_NAME=NRMSbert
+
+srun python baseline/bert/train.py \
+    --pretrained_mode=bert \
+    --word_embedding_dim=128 \
+    --learning_rate=0.00001 \
+    --dropout_probability=0.2 \
+    --batch_size=16 \
+    --finetune_layers=4
+
+srun python baseline/bert/evaluate.py \
+    --pretrained_mode=bert \
+    --word_embedding_dim=128 \
+    --learning_rate=0.00001 \
+    --dropout_probability=0.2 \
+    --batch_size=16 \
+    --finetune_layers=4
