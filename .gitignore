@@ -7,3 +7,5 @@ outputs/
 .env
 
 job_scripts/out
+
+wandb
