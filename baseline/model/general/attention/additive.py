@@ -9,11 +9,11 @@ class AdditiveAttention(torch.nn.Module):
     Originally for NAML.
     """
     def __init__(self,
-                 query_vector_dim,
-                 candidate_vector_dim,
+                 query_vector_dim: int,
+                 candidate_vector_dim: int,
                  writer=None,
-                 tag=None,
-                 names=None):
+                 tag: str | None = None,
+                 names: list[str] | None = None) -> None:
         super(AdditiveAttention, self).__init__()
         self.linear = nn.Linear(candidate_vector_dim, query_vector_dim)
         self.attention_query_vector = nn.Parameter(
