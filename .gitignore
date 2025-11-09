@@ -8,4 +8,5 @@ outputs/
 
 job_scripts/out
 
-wandb
+checkpoint/
+wandb/
