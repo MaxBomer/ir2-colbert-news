@@ -133,6 +133,7 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
             convert_to_numpy=False,
             is_query=False,  # Encode as documents
             device=str(device),
+            show_progress_bar=False,  # Disable progress bar during training
         )
         
         # ColBERT returns multi-vector embeddings
@@ -183,15 +184,59 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
         """
         device = next(self.parameters()).device
         
-        # Encode candidate news: [batch_size, 1 + K, embedding_dim]
-        candidate_news_vector = torch.stack(
-            [self._encode_news_with_colbert(x) for x in candidate_news], dim=1
+        # Batch encode all candidate news at once
+        # Stack all candidate news input_ids: [batch_size * (1+K), seq_len]
+        all_candidate_input_ids = torch.cat([x["title"][:, 0] for x in candidate_news], dim=0)
+        all_candidate_texts = self._token_ids_to_text(all_candidate_input_ids)
+        
+        # Encode all candidates in one batch
+        batch_size = candidate_news[0]["title"].shape[0]
+        num_candidates = len(candidate_news)
+        
+        candidate_embeddings = self.colbert_model.encode(
+            sentences=all_candidate_texts,
+            batch_size=len(all_candidate_texts),
+            convert_to_tensor=True,
+            convert_to_numpy=False,
+            is_query=False,
+            device=str(device),
+            show_progress_bar=False,  # Disable progress bar during training
         )
         
-        # Encode clicked news: [batch_size, num_clicked_news_a_user, embedding_dim]
-        clicked_news_vector = torch.stack(
-            [self._encode_news_with_colbert(x) for x in clicked_news], dim=1
+        # Pool and reshape: [batch_size, 1+K, embedding_dim]
+        if isinstance(candidate_embeddings, list):
+            candidate_embeddings = torch.stack([emb.mean(dim=0) if isinstance(emb, torch.Tensor) else torch.from_numpy(emb.mean(axis=0)) for emb in candidate_embeddings], dim=0)
+        elif candidate_embeddings.dim() == 3:
+            candidate_embeddings = candidate_embeddings.mean(dim=1)
+        elif candidate_embeddings.dim() == 2:
+            candidate_embeddings = candidate_embeddings.mean(dim=0, keepdim=True) if candidate_embeddings.shape[0] == 1 else candidate_embeddings
+        
+        candidate_news_vector = candidate_embeddings.view(batch_size, num_candidates, -1).to(device)
+        
+        # Batch encode all clicked news at once
+        all_clicked_input_ids = torch.cat([x["title"][:, 0] for x in clicked_news], dim=0)
+        all_clicked_texts = self._token_ids_to_text(all_clicked_input_ids)
+        
+        clicked_embeddings = self.colbert_model.encode(
+            sentences=all_clicked_texts,
+            batch_size=len(all_clicked_texts),
+            convert_to_tensor=True,
+            convert_to_numpy=False,
+            is_query=False,
+            device=str(device),
+            show_progress_bar=False,  # Disable progress bar during training
         )
+        
+        # Pool and reshape: [batch_size, num_clicked_news_a_user, embedding_dim]
+        if isinstance(clicked_embeddings, list):
+            clicked_embeddings = torch.stack([emb.mean(dim=0) if isinstance(emb, torch.Tensor) else torch.from_numpy(emb.mean(axis=0)) for emb in clicked_embeddings], dim=0)
+        elif clicked_embeddings.dim() == 3:
+            clicked_embeddings = clicked_embeddings.mean(dim=1)
+        elif clicked_embeddings.dim() == 2:
+            clicked_embeddings = clicked_embeddings.mean(dim=0, keepdim=True) if clicked_embeddings.shape[0] == 1 else clicked_embeddings
+        
+        num_clicked = len(clicked_news)
+        clicked_news_vector = clicked_embeddings.view(batch_size, num_clicked, -1).to(device)
         
         # Apply mask to clicked news vectors
         clicked_news_mask_array = np.array(clicked_news_mask, dtype=np.float32)

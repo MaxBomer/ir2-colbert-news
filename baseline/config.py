@@ -51,6 +51,29 @@ def parse_args() -> argparse.Namespace:
         help='ColBERT embedding dimension (auto-detected if not specified)'
     )
     parser.add_argument(
+        '--colbert_max_query_tokens',
+        type=int,
+        default=32,
+        help='Maximum number of tokens for query encoding (default: 32)'
+    )
+    parser.add_argument(
+        '--colbert_max_doc_tokens',
+        type=int,
+        default=128,
+        help='Maximum number of tokens for document encoding (default: 128)'
+    )
+    parser.add_argument(
+        '--colbert_enable_caching',
+        action='store_true',
+        help='Enable caching of news embeddings (default: False)'
+    )
+    parser.add_argument(
+        '--colbert_cache_size',
+        type=int,
+        default=10000,
+        help='Maximum number of cached embeddings (default: 10000)'
+    )
+    parser.add_argument(
         '--bert_version',
         type=str,
         default='tiny',
@@ -186,6 +209,10 @@ class NRMSbertConfig:
     # ColBERT-specific parameters (optional)
     colbert_model_name: str | None = None
     colbert_embedding_dim: int | None = None
+    colbert_max_query_tokens: int = 32
+    colbert_max_doc_tokens: int = 128
+    colbert_enable_caching: bool = False
+    colbert_cache_size: int = 10000
     query_vector_dim: int = 200
     num_epochs: int = 100
     num_batches_show_loss: int = 100
@@ -283,6 +310,10 @@ def create_config() -> NRMSbertConfig:
         finetune_layers=args.finetune_layers,
         colbert_model_name=args.colbert_model_name,
         colbert_embedding_dim=args.colbert_embedding_dim,
+        colbert_max_query_tokens=args.colbert_max_query_tokens,
+        colbert_max_doc_tokens=args.colbert_max_doc_tokens,
+        colbert_enable_caching=args.colbert_enable_caching,
+        colbert_cache_size=args.colbert_cache_size,
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         dropout_probability=args.dropout_probability,
