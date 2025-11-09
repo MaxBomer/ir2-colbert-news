@@ -1,0 +1,137 @@
+Using device: cpu
+Training model NRMSbert
+NRMSbert(
+  (news_encoder): NewsEncoder(
+    (bert): BertModel(
+      (embeddings): BertEmbeddings(
+        (word_embeddings): Embedding(30522, 128, padding_idx=0)
+        (position_embeddings): Embedding(512, 128)
+        (token_type_embeddings): Embedding(2, 128)
+        (LayerNorm): LayerNorm((128,), eps=1e-12, elementwise_affine=True)
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (encoder): BertEncoder(
+        (layer): ModuleList(
+          (0-1): 2 x BertLayer(
+            (attention): BertAttention(
+              (self): BertSdpaSelfAttention(
+                (query): Linear(in_features=128, out_features=128, bias=True)
+                (key): Linear(in_features=128, out_features=128, bias=True)
+                (value): Linear(in_features=128, out_features=128, bias=True)
+                (dropout): Dropout(p=0.1, inplace=False)
+              )
+              (output): BertSelfOutput(
+                (dense): Linear(in_features=128, out_features=128, bias=True)
+                (LayerNorm): LayerNorm((128,), eps=1e-12, elementwise_affine=True)
+                (dropout): Dropout(p=0.1, inplace=False)
+              )
+            )
+            (intermediate): BertIntermediate(
+              (dense): Linear(in_features=128, out_features=512, bias=True)
+              (intermediate_act_fn): GELUActivation()
+            )
+            (output): BertOutput(
+              (dense): Linear(in_features=512, out_features=128, bias=True)
+              (LayerNorm): LayerNorm((128,), eps=1e-12, elementwise_affine=True)
+              (dropout): Dropout(p=0.1, inplace=False)
+            )
+          )
+        )
+      )
+      (pooler): BertPooler(
+        (dense): Linear(in_features=128, out_features=128, bias=True)
+        (activation): Tanh()
+      )
+    )
+    (pooler): Sequential(
+      (0): Linear(in_features=128, out_features=128, bias=True)
+      (1): Dropout(p=0.1, inplace=False)
+      (2): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+      (3): SiLU()
+    )
+    (multihead_self_attention): MultiHeadSelfAttention(
+      (W_Q): Linear(in_features=128, out_features=128, bias=True)
+      (W_K): Linear(in_features=128, out_features=128, bias=True)
+      (W_V): Linear(in_features=128, out_features=128, bias=True)
+    )
+    (additive_attention): AdditiveAttention(
+      (linear): Linear(in_features=128, out_features=200, bias=True)
+    )
+  )
+  (user_encoder): UserEncoder(
+    (multihead_self_attention): MultiHeadSelfAttention(
+      (W_Q): Linear(in_features=128, out_features=128, bias=True)
+      (W_K): Linear(in_features=128, out_features=128, bias=True)
+      (W_V): Linear(in_features=128, out_features=128, bias=True)
+    )
+    (additive_attention): AdditiveAttention(
+      (linear): Linear(in_features=128, out_features=200, bias=True)
+    )
+  )
+  (click_predictor): DotProductClickPredictor()
+)
+load original data:
+00:00:01
+Load training dataset with size 62600.
+00:00:08
+load val data:
+00:00:08
+Finish load val data:
+00:00:12
+Finish Build dataloader:
+00:00:12
+Start to do the model training:
+00:00:12
+Traceback (most recent call last):
+  File "/gpfs/home2/scur1748/ir2-colbert-news/baseline/bert/train.py", line 356, in <module>
+    train()
+  File "/gpfs/home2/scur1748/ir2-colbert-news/baseline/bert/train.py", line 204, in train
+    minibatch = next(dataloader)
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/torch/utils/data/dataloader.py", line 708, in __next__
+    data = self._next_data()
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/torch/utils/data/dataloader.py", line 1480, in _next_data
+    return self._process_data(data)
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/torch/utils/data/dataloader.py", line 1505, in _process_data
+    data.reraise()
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/torch/_utils.py", line 733, in reraise
+    raise exception
+AttributeError: Caught AttributeError in DataLoader worker process 0.
+Original Traceback (most recent call last):
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/torch/utils/data/_utils/worker.py", line 349, in _worker_loop
+    data = fetcher.fetch(index)  # type: ignore[possibly-undefined]
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/torch/utils/data/_utils/fetch.py", line 52, in fetch
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/torch/utils/data/_utils/fetch.py", line 52, in <listcomp>
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/gpfs/home2/scur1748/ir2-colbert-news/baseline/bert/dataset.py", line 194, in __getitem__
+    self.news2dict[x] for x in row.candidate_news.split()
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/pandas/core/generic.py", line 6321, in __getattr__
+    return object.__getattribute__(self, name)
+AttributeError: 'Series' object has no attribute 'candidate_news'
+
+Traceback (most recent call last):
+  File "/gpfs/home2/scur1748/ir2-colbert-news/baseline/bert/train.py", line 356, in <module>
+    train()
+  File "/gpfs/home2/scur1748/ir2-colbert-news/baseline/bert/train.py", line 204, in train
+    minibatch = next(dataloader)
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/torch/utils/data/dataloader.py", line 708, in __next__
+    data = self._next_data()
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/torch/utils/data/dataloader.py", line 1480, in _next_data
+    return self._process_data(data)
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/torch/utils/data/dataloader.py", line 1505, in _process_data
+    data.reraise()
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/torch/_utils.py", line 733, in reraise
+    raise exception
+AttributeError: Caught AttributeError in DataLoader worker process 0.
+Original Traceback (most recent call last):
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/torch/utils/data/_utils/worker.py", line 349, in _worker_loop
+    data = fetcher.fetch(index)  # type: ignore[possibly-undefined]
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/torch/utils/data/_utils/fetch.py", line 52, in fetch
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/torch/utils/data/_utils/fetch.py", line 52, in <listcomp>
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/gpfs/home2/scur1748/ir2-colbert-news/baseline/bert/dataset.py", line 194, in __getitem__
+    self.news2dict[x] for x in row.candidate_news.split()
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/pandas/core/generic.py", line 6321, in __getattr__
+    return object.__getattribute__(self, name)
+AttributeError: 'Series' object has no attribute 'candidate_news'

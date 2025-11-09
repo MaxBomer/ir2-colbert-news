@@ -1,0 +1,23 @@
+2025-11-09 00:58:22,376 INFO    MainThread:1404928 [wandb_setup.py:_flush():81] Current SDK version is 0.22.3
+2025-11-09 00:58:22,376 INFO    MainThread:1404928 [wandb_setup.py:_flush():81] Configure stats pid to 1404928
+2025-11-09 00:58:22,376 INFO    MainThread:1404928 [wandb_setup.py:_flush():81] Loading settings from /home/scur1748/.config/wandb/settings
+2025-11-09 00:58:22,376 INFO    MainThread:1404928 [wandb_setup.py:_flush():81] Loading settings from /gpfs/home2/scur1748/ir2-colbert-news/wandb/settings
+2025-11-09 00:58:22,376 INFO    MainThread:1404928 [wandb_setup.py:_flush():81] Loading settings from environment variables
+2025-11-09 00:58:22,376 INFO    MainThread:1404928 [wandb_init.py:setup_run_log_directory():706] Logging user logs to /gpfs/home2/scur1748/ir2-colbert-news/wandb/run-20251109_005822-9eh5gphx/logs/debug.log
+2025-11-09 00:58:22,376 INFO    MainThread:1404928 [wandb_init.py:setup_run_log_directory():707] Logging internal logs to /gpfs/home2/scur1748/ir2-colbert-news/wandb/run-20251109_005822-9eh5gphx/logs/debug-internal.log
+2025-11-09 00:58:22,376 INFO    MainThread:1404928 [wandb_init.py:init():833] calling init triggers
+2025-11-09 00:58:22,376 INFO    MainThread:1404928 [wandb_init.py:init():838] wandb.init called with sweep_config: {}
+config: {'learning_rate': 1e-05, 'model': 'NRMSbert', 'pretrained_mode': 'bert', 'word_embedding_dim': 128, 'dropout_probability': 0.2, 'finetune_layers': 4, '_wandb': {}}
+2025-11-09 00:58:22,376 INFO    MainThread:1404928 [wandb_init.py:init():881] starting backend
+2025-11-09 00:58:22,599 INFO    MainThread:1404928 [wandb_init.py:init():884] sending inform_init request
+2025-11-09 00:58:22,617 INFO    MainThread:1404928 [wandb_init.py:init():892] backend started and connected
+2025-11-09 00:58:22,621 INFO    MainThread:1404928 [wandb_init.py:init():962] updated telemetry
+2025-11-09 00:58:22,641 INFO    MainThread:1404928 [wandb_init.py:init():986] communicating run to backend with 90.0 second timeout
+2025-11-09 00:58:23,182 INFO    MainThread:1404928 [wandb_init.py:init():1033] starting run threads in backend
+2025-11-09 00:58:23,343 INFO    MainThread:1404928 [wandb_run.py:_console_start():2506] atexit reg
+2025-11-09 00:58:23,343 INFO    MainThread:1404928 [wandb_run.py:_redirect():2354] redirect: wrap_raw
+2025-11-09 00:58:23,343 INFO    MainThread:1404928 [wandb_run.py:_redirect():2423] Wrapping output streams.
+2025-11-09 00:58:23,343 INFO    MainThread:1404928 [wandb_run.py:_redirect():2446] Redirects installed.
+2025-11-09 00:58:23,345 INFO    MainThread:1404928 [wandb_init.py:init():1073] run started, returning control to user process
+2025-11-09 00:58:23,347 INFO    wandb-AsyncioManager-main:1404928 [service_client.py:_forward_responses():80] Reached EOF.
+2025-11-09 00:58:23,347 INFO    wandb-AsyncioManager-main:1404928 [mailbox.py:close():137] Closing mailbox, abandoning 2 handles.

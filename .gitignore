@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 data/
+data_downsampled_20k/
 outputs/
 .venv/
 .env

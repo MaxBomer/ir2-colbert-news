@@ -1,0 +1,110 @@
+Using device: cpu
+Training model NRMSbert
+NRMSbert(
+  (news_encoder): NewsEncoder(
+    (bert): BertModel(
+      (embeddings): BertEmbeddings(
+        (word_embeddings): Embedding(30522, 128, padding_idx=0)
+        (position_embeddings): Embedding(512, 128)
+        (token_type_embeddings): Embedding(2, 128)
+        (LayerNorm): LayerNorm((128,), eps=1e-12, elementwise_affine=True)
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (encoder): BertEncoder(
+        (layer): ModuleList(
+          (0-1): 2 x BertLayer(
+            (attention): BertAttention(
+              (self): BertSdpaSelfAttention(
+                (query): Linear(in_features=128, out_features=128, bias=True)
+                (key): Linear(in_features=128, out_features=128, bias=True)
+                (value): Linear(in_features=128, out_features=128, bias=True)
+                (dropout): Dropout(p=0.1, inplace=False)
+              )
+              (output): BertSelfOutput(
+                (dense): Linear(in_features=128, out_features=128, bias=True)
+                (LayerNorm): LayerNorm((128,), eps=1e-12, elementwise_affine=True)
+                (dropout): Dropout(p=0.1, inplace=False)
+              )
+            )
+            (intermediate): BertIntermediate(
+              (dense): Linear(in_features=128, out_features=512, bias=True)
+              (intermediate_act_fn): GELUActivation()
+            )
+            (output): BertOutput(
+              (dense): Linear(in_features=512, out_features=128, bias=True)
+              (LayerNorm): LayerNorm((128,), eps=1e-12, elementwise_affine=True)
+              (dropout): Dropout(p=0.1, inplace=False)
+            )
+          )
+        )
+      )
+      (pooler): BertPooler(
+        (dense): Linear(in_features=128, out_features=128, bias=True)
+        (activation): Tanh()
+      )
+    )
+    (pooler): Sequential(
+      (0): Linear(in_features=128, out_features=128, bias=True)
+      (1): Dropout(p=0.1, inplace=False)
+      (2): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+      (3): SiLU()
+    )
+    (multihead_self_attention): MultiHeadSelfAttention(
+      (W_Q): Linear(in_features=128, out_features=128, bias=True)
+      (W_K): Linear(in_features=128, out_features=128, bias=True)
+      (W_V): Linear(in_features=128, out_features=128, bias=True)
+    )
+    (additive_attention): AdditiveAttention(
+      (linear): Linear(in_features=128, out_features=200, bias=True)
+    )
+  )
+  (user_encoder): UserEncoder(
+    (multihead_self_attention): MultiHeadSelfAttention(
+      (W_Q): Linear(in_features=128, out_features=128, bias=True)
+      (W_K): Linear(in_features=128, out_features=128, bias=True)
+      (W_V): Linear(in_features=128, out_features=128, bias=True)
+    )
+    (additive_attention): AdditiveAttention(
+      (linear): Linear(in_features=128, out_features=200, bias=True)
+    )
+  )
+  (click_predictor): DotProductClickPredictor()
+)
+load original data:
+00:00:02
+Traceback (most recent call last):
+  File "/gpfs/home2/scur1748/ir2-colbert-news/baseline/bert/train.py", line 356, in <module>
+    train()
+  File "/gpfs/home2/scur1748/ir2-colbert-news/baseline/bert/train.py", line 147, in train
+    dataset = BaseDataset(config.original_data_path + '/train/behaviors_parsed.tsv',
+  File "/gpfs/home2/scur1748/ir2-colbert-news/baseline/bert/dataset.py", line 139, in __init__
+    self.behaviors_parsed = pd.read_table(behaviors_path)
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/pandas/io/parsers/readers.py", line 1405, in read_table
+    return _read(filepath_or_buffer, kwds)
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/pandas/io/parsers/readers.py", line 620, in _read
+    parser = TextFileReader(filepath_or_buffer, **kwds)
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/pandas/io/parsers/readers.py", line 1620, in __init__
+    self._engine = self._make_engine(f, self.engine)
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/pandas/io/parsers/readers.py", line 1880, in _make_engine
+    self.handles = get_handle(
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/pandas/io/common.py", line 873, in get_handle
+    handle = open(
+FileNotFoundError: [Errno 2] No such file or directory: 'baseline/data_downsampled_20k/train/behaviors_parsed.tsv'
+Traceback (most recent call last):
+  File "/gpfs/home2/scur1748/ir2-colbert-news/baseline/bert/train.py", line 356, in <module>
+    train()
+  File "/gpfs/home2/scur1748/ir2-colbert-news/baseline/bert/train.py", line 147, in train
+    dataset = BaseDataset(config.original_data_path + '/train/behaviors_parsed.tsv',
+  File "/gpfs/home2/scur1748/ir2-colbert-news/baseline/bert/dataset.py", line 139, in __init__
+    self.behaviors_parsed = pd.read_table(behaviors_path)
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/pandas/io/parsers/readers.py", line 1405, in read_table
+    return _read(filepath_or_buffer, kwds)
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/pandas/io/parsers/readers.py", line 620, in _read
+    parser = TextFileReader(filepath_or_buffer, **kwds)
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/pandas/io/parsers/readers.py", line 1620, in __init__
+    self._engine = self._make_engine(f, self.engine)
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/pandas/io/parsers/readers.py", line 1880, in _make_engine
+    self.handles = get_handle(
+  File "/home/scur1748/.conda/envs/newsrec/lib/python3.9/site-packages/pandas/io/common.py", line 873, in get_handle
+    handle = open(
+FileNotFoundError: [Errno 2] No such file or directory: 'baseline/data_downsampled_20k/train/behaviors_parsed.tsv'

@@ -264,9 +264,9 @@ def parse_news(source, target, category2int_path, word2int_path,
 
 
 if __name__ == '__main__':
-    train_dir = 'baseline/data/train'
-    val_dir = 'baseline/data/val'
-    test_dir = 'baseline/data/test'
+    train_dir = 'baseline/data_downsampled_20k/train'
+    val_dir = 'baseline/data_downsampled_20k/val'
+    test_dir = 'baseline/data_downsampled_20k/test'
 
     print('Process data for training')
 
