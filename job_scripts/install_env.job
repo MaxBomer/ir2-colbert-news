@@ -16,3 +16,9 @@ conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/ma
 conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
 
 conda env create -f environment.yml
+
+source activate newsrec
+
+pip uninstall -y torch torchvision torchaudio
+pip install --index-url https://download.pytorch.org/whl/cu124 \
+  torch==2.6.0 torchvision torchaudio
