@@ -26,16 +26,35 @@ def parse_args() -> argparse.Namespace:
     
     # Model parameters
     parser.add_argument(
+        '--model_type',
+        type=str,
+        default='NRMSbert',
+        choices=['NRMSbert', 'ColBERT'],
+        help='Model type: NRMSbert or ColBERT'
+    )
+    parser.add_argument(
         '--pretrained_model_name',
         type=str,
         default='prajjwal1/bert-tiny',
-        help='Pretrained BERT model name or path'
+        help='Pretrained model name or path (BERT for NRMSbert, any transformer for ColBERT)'
+    )
+    parser.add_argument(
+        '--colbert_model_name',
+        type=str,
+        default=None,
+        help='ColBERT model name (if different from pretrained_model_name)'
+    )
+    parser.add_argument(
+        '--colbert_embedding_dim',
+        type=int,
+        default=None,
+        help='ColBERT embedding dimension (auto-detected if not specified)'
     )
     parser.add_argument(
         '--bert_version',
         type=str,
         default='tiny',
-        help='BERT version identifier (tiny, mini, medium, large)'
+        help='BERT version identifier (tiny, mini, medium, large) - used for data paths'
     )
     parser.add_argument(
         '--word_embedding_dim',
@@ -132,15 +151,16 @@ def parse_args() -> argparse.Namespace:
 
 @dataclass
 class NRMSbertConfig:
-    """Configuration for NRMSbert model."""
+    """Configuration for news recommendation models (NRMSbert, ColBERT, etc.)."""
     
     # Data paths (no defaults - must come first)
     current_data_path: Path
     original_data_path: Path
     
     # Model architecture (no defaults - must come first)
+    model_type: str  # 'NRMSbert' or 'ColBERT'
     pretrained_model_name: str
-    bert_version: str
+    bert_version: str  # Used for data path organization
     word_embedding_dim: int
     num_attention_heads: int
     finetune_layers: int
@@ -163,6 +183,9 @@ class NRMSbertConfig:
     num_users: int
     
     # Fields with defaults (must come after fields without defaults)
+    # ColBERT-specific parameters (optional)
+    colbert_model_name: str | None = None
+    colbert_embedding_dim: int | None = None
     query_vector_dim: int = 200
     num_epochs: int = 100
     num_batches_show_loss: int = 100
@@ -188,7 +211,7 @@ class NRMSbertConfig:
     @property
     def checkpoint_dir(self) -> Path:
         """Get checkpoint directory path."""
-        return self.current_data_path / 'checkpoint' / 'bert' / self.bert_version / 'NRMSbert'
+        return self.current_data_path / 'checkpoint' / 'bert' / self.bert_version / self.model_type
     
     @property
     def train_data_path(self) -> Path:
@@ -252,11 +275,14 @@ def create_config() -> NRMSbertConfig:
     return NRMSbertConfig(
         current_data_path=args.current_data_path,
         original_data_path=args.original_data_path,
+        model_type=args.model_type,
         pretrained_model_name=args.pretrained_model_name,
         bert_version=args.bert_version,
         word_embedding_dim=args.word_embedding_dim,
         num_attention_heads=args.num_attention_heads,
         finetune_layers=args.finetune_layers,
+        colbert_model_name=args.colbert_model_name,
+        colbert_embedding_dim=args.colbert_embedding_dim,
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         dropout_probability=args.dropout_probability,

@@ -16,7 +16,8 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from config import config
-from model.NRMSbert import NRMSbert
+from model.base import BaseNewsRecommendationModel
+from model.factory import create_model
 from utils import load_news_dataset, save_news_dataset, should_pin_memory, get_device, should_display_progress
 
 # Setup logging
@@ -289,7 +290,7 @@ class EvaluationConfig:
     max_count: int = sys.maxsize
 
 
-def compute_news_vectors(model: NRMSbert, news_dataset: NewsDataset, device: torch.device, eval_config: EvaluationConfig) -> Dict[str, torch.Tensor]:
+def compute_news_vectors(model: BaseNewsRecommendationModel, news_dataset: NewsDataset, device: torch.device, eval_config: EvaluationConfig) -> Dict[str, torch.Tensor]:
     """Compute news article vectors.
     
     Args:
@@ -345,7 +346,7 @@ def compute_news_vectors(model: NRMSbert, news_dataset: NewsDataset, device: tor
     return news2vector
 
 
-def compute_user_vectors(model: NRMSbert, user_dataset: UserDataset, news2vector: Dict[str, torch.Tensor], device: torch.device, eval_config: EvaluationConfig) -> Dict[str, torch.Tensor]:
+def compute_user_vectors(model: BaseNewsRecommendationModel, user_dataset: UserDataset, news2vector: Dict[str, torch.Tensor], device: torch.device, eval_config: EvaluationConfig) -> Dict[str, torch.Tensor]:
     """Compute user vectors from click histories.
     
     Args:
@@ -400,7 +401,7 @@ class EvaluationParams:
 
 
 @torch.no_grad()
-def evaluate(model: NRMSbert, params: EvaluationParams) -> Tuple[float, float, float, float]:
+def evaluate(model: BaseNewsRecommendationModel, params: EvaluationParams) -> Tuple[float, float, float, float]:
     """Evaluate model on target directory.
     
     Args:
@@ -516,10 +517,10 @@ def find_latest_checkpoint(checkpoint_dir: Path) -> Optional[Path]:
 if __name__ == '__main__':
     device = get_device()
     logger.info(f'Using device: {device}')
-    logger.info('Evaluating NRMSbert model')
+    logger.info(f'Evaluating {config.model_type} model')
     
     # Load model
-    model = NRMSbert(config).to(device)
+    model = create_model(config).to(device)
     
     # Find and load checkpoint
     checkpoint_path = find_latest_checkpoint(config.checkpoint_dir)

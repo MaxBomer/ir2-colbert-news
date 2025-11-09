@@ -18,7 +18,8 @@ from tqdm import tqdm
 from config import config, NRMSbertConfig
 from dataset import BaseDataset
 from evaluate import NewsDataset, evaluate, EvaluationParams
-from model.NRMSbert import NRMSbert
+from model.base import BaseNewsRecommendationModel
+from model.factory import create_model
 from utils import get_device, should_pin_memory, should_display_progress
 
 # Setup logging
@@ -34,7 +35,7 @@ class TrainingContext:
     """Context object holding high-level training state."""
     config: NRMSbertConfig
     device: torch.device
-    model: NRMSbert
+    model: BaseNewsRecommendationModel
     train_dataset: BaseDataset
     val_dataset: NewsDataset
     dataloader: DataLoader
@@ -112,8 +113,8 @@ class EarlyStopping:
             return early_stop, False
 
 
-def load_model(device: torch.device) -> NRMSbert:
-    """Load and initialize NRMSbert model.
+def load_model(device: torch.device) -> BaseNewsRecommendationModel:
+    """Load and initialize model based on config.
     
     Args:
         device: Device to load model on
@@ -121,8 +122,9 @@ def load_model(device: torch.device) -> NRMSbert:
     Returns:
         Initialized model
     """
-    model = NRMSbert(config).to(device)
+    model = create_model(config).to(device)
     logger.debug(f"Model architecture:\n{model}")
+    logger.info(f"Using model type: {config.model_type}")
     return model
 
 
@@ -247,7 +249,7 @@ def setup_training_context(cfg: NRMSbertConfig) -> TrainingContext:
     device = get_device()
     
     # Setup logging
-    log_dir = Path("./runs/NRMSbert") / datetime.datetime.now().replace(microsecond=0).isoformat()
+    log_dir = Path(f"./runs/{cfg.model_type}") / datetime.datetime.now().replace(microsecond=0).isoformat()
     if 'REMARK' in os.environ:
         log_dir = Path(str(log_dir) + '-' + os.environ['REMARK'])
     writer = SummaryWriter(log_dir=str(log_dir))
@@ -480,5 +482,5 @@ def train() -> None:
 if __name__ == '__main__':
     device = get_device()
     logger.info(f'Using device: {device}')
-    logger.info('Training NRMSbert model')
+    logger.info(f'Training {config.model_type} model')
     train()

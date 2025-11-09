@@ -24,7 +24,7 @@ class AdditiveAttention(torch.nn.Module):
         self.names = names
         self.local_step = 1
 
-    def forward(self, candidate_vector):
+    def forward(self, candidate_vector: torch.Tensor) -> torch.Tensor:
         """
         Args:
             candidate_vector: batch_size, candidate_size, candidate_vector_dim

@@ -4,12 +4,13 @@ import torch
 import torch.nn as nn
 
 from config import NRMSbertConfig
+from model.base import BaseNewsRecommendationModel
 from model.general.click_predictor.dot_product import DotProductClickPredictor
 from model.NRMSbert.news_encoder import NewsEncoder
 from model.NRMSbert.user_encoder import UserEncoder
 
 
-class NRMSbert(nn.Module):
+class NRMSbert(BaseNewsRecommendationModel):
     """Neural News Recommendation with Multi-Head Self-Attention using BERT.
     
     Takes 1 + K candidate news and a list of user clicked news,

@@ -4,9 +4,18 @@ Welcome to the **NRMSbert** (Neural News Recommendation with Multi-Head Self-Att
 
 ## Model Overview
 
-- **Model**: NRMSbert (Neural News Recommendation with Multi-Head Self-Attention)
-- **Language Model**: BERT Tiny (`prajjwal1/bert-tiny`) - 128 dimensions, 2 layers
-- **Reference**: [NRMS Paper](https://www.aclweb.org/anthology/D19-1671/)
+This codebase supports multiple news recommendation models:
+
+- **NRMSbert**: Neural News Recommendation with Multi-Head Self-Attention using BERT
+  - **Language Model**: BERT Tiny (`prajjwal1/bert-tiny`) - 128 dimensions, 2 layers
+  - **Reference**: [NRMS Paper](https://www.aclweb.org/anthology/D19-1671/)
+  
+- **ColBERT**: Late-interaction model adapter for news recommendation
+  - Uses ColBERT from [PyLate](https://github.com/lightonai/pylate) library
+  - Supports any transformer model compatible with ColBERT
+  - Converts tokenized inputs to text and uses ColBERT's multi-vector encoding
+
+Models can be selected via `--model_type` argument (default: `NRMSbert`).
 
 ## Getting Started
 
@@ -144,8 +153,17 @@ To verify everything works before a full training run:
 ```bash
 cd baseline
 
-# Quick test: 10 batches, validate on 100 samples
+# Test NRMSbert: 10 batches, validate on 100 samples
 uv run python train.py \
+    --model_type NRMSbert \
+    --pretrained_model_name prajjwal1/bert-tiny \
+    --bert_version tiny \
+    --batch_size 32 \
+    --test_run
+
+# Test ColBERT: 10 batches, validate on 100 samples
+uv run python train.py \
+    --model_type ColBERT \
     --pretrained_model_name prajjwal1/bert-tiny \
     --bert_version tiny \
     --batch_size 32 \
@@ -159,6 +177,17 @@ uv run python train.py \
     --max_batches 50 \
     --max_validation_samples 1000
 ```
+
+**Test Model Loading:**
+
+Before training, verify that models can be loaded correctly:
+
+```bash
+cd baseline
+uv run python test_models.py
+```
+
+This will test loading both NRMSbert and ColBERT models to ensure the setup is correct.
 
 ### Step 5: Evaluate the Model
 
