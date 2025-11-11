@@ -480,7 +480,7 @@ if __name__ == '__main__':
         print('No checkpoint file found!')
         exit()
     print(f"Load saved parameters in {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path)
+    checkpoint = torch.load(checkpoint_path, weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
     if config.pretrained_mode == 'llama':
@@ -490,10 +490,10 @@ if __name__ == '__main__':
         
     if os.path.exists(dataset_evaluate_path):
         evaluate_dataset = load_news_dataset(dataset_evaluate_path)
-        auc, mrr, ndcg5, ndcg10 = evaluate(model, path.join(config.original_data_path, 'test'),
+        auc, mrr, ndcg5, ndcg10 = evaluate(model, path.join(config.original_data_path, 'val'),
                                     config.num_workers, news_dataset_built=evaluate_dataset)
     else:
-        auc, mrr, ndcg5, ndcg10 = evaluate(model, path.join(config.original_data_path, 'test'),
+        auc, mrr, ndcg5, ndcg10 = evaluate(model, path.join(config.original_data_path, 'val'),
                                         config.num_workers)
     print(
         f'AUC: {auc:.4f}\nMRR: {mrr:.4f}\nnDCG@5: {ndcg5:.4f}\nnDCG@10: {ndcg10:.4f}'

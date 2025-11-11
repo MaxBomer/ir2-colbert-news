@@ -327,7 +327,7 @@ def train():
 
     # load and print best
     best_checkpoint_path = config.current_data_path + f"/checkpoint/{config.pretrained_mode}/{model_name}/ckpt-{best_step}.pth"
-    checkpoint = torch.load(best_checkpoint_path)
+    checkpoint = torch.load(best_checkpoint_path, weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
     # evaluate_popular(model, config.original_data_path + '/val', config.num_workers, news_dataset_built=evaluate_dataset)
