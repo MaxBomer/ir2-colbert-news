@@ -16,13 +16,13 @@ source activate newsrec
 
 export MODEL_NAME=NRMSbert
 
-# srun python baseline/bert/train.py \
-#     --pretrained_model_name prajjwal1/bert-tiny \
-#     --word_embedding_dim=128 \
-#     --learning_rate=0.00001 \
-#     --dropout_probability=0.2 \
-#     --batch_size=16 \
-#     --finetune_layers=4
+srun python baseline/bert/train.py \
+    --pretrained_model_name prajjwal1/bert-tiny \
+    --word_embedding_dim=128 \
+    --learning_rate=0.00001 \
+    --dropout_probability=0.2 \
+    --batch_size=16 \
+    --finetune_layers=4
 
 srun python baseline/bert/evaluate.py \
     --pretrained_model_name prajjwal1/bert-tiny \
