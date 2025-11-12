@@ -1,209 +1,135 @@
-from torch.utils.data import Dataset
-import pandas as pd
-from ast import literal_eval
-from os import path
-import numpy as np
-from config import model_name
-import importlib
-import torch
-from transformers import BertTokenizer, BertModel, AutoTokenizer, AutoModelForCausalLM
-import pandas as pd
-import csv
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+"""Dataset classes for NRMSbert model."""
 import ast
+from pathlib import Path
+from typing import Dict, List, Union
 
-from utils import pretrained_encode_bert, pretrained_encode_glove, pretrained_encode_llama
+import pandas as pd
+import torch
+from ast import literal_eval
+from torch.utils.data import Dataset
 
-try:
-    config = getattr(importlib.import_module('config'), f"{model_name}Config")
-except AttributeError:
-    print(f"{model_name} not included!")
-    exit()
-
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-
-# class BaseDataset(Dataset):
-#     def __init__(self, behaviors_path, news_path, config):
-#         super(BaseDataset, self).__init__()
-#         self.config = config
-#         assert all(attribute in [
-#             'category', 'subcategory', 'title', 'abstract', 'title_entities',
-#             'abstract_entities'
-#         ] for attribute in config.dataset_attributes['news'])
-#         assert all(attribute in ['user', 'clicked_news_length']
-#                    for attribute in config.dataset_attributes['record'])
-
-#         self.behaviors_parsed = pd.read_table(behaviors_path)
-
-#         self.news_parsed = pd.read_table(
-#             news_path,
-#             index_col='id',
-#             usecols=['id'] + config.dataset_attributes['news'],
-#             converters={
-#                 attribute: literal_eval
-#                 for attribute in set(config.dataset_attributes['news']) & set([
-#                     'title_entities', 'abstract_entities'
-#                     ])
-#             })
-#         self.news_parsed['title_mask'] = 0
-#         self.news_parsed['abstract_mask'] = 0
+from config import config
 
 
-#         self.news_id2int = {x: i for i, x in enumerate(self.news_parsed.index)}
-#         self.news2dict = self.news_parsed.to_dict('index')
-
-
-#         for key1 in self.news2dict.keys():
-#             keys_to_iterate = list(self.news2dict[key1].keys())
-#             if 'title_mask' not in keys_to_iterate:
-#                 print("========================================================================")
-#             for key2 in keys_to_iterate:
-#                 if key2 in ['title', 'abstract']:
-#                     self.news2dict[key1][key2] = ast.literal_eval(self.news2dict[key1][key2])
-#                     assert torch.tensor(self.news2dict[key1][key2]['input_ids']).shape == torch.tensor(self.news2dict[key1][key2]['attention_mask']).shape
-#                     # # self.news2dict[key1][key2] = torch.cat([torch.tensor(self.news2dict[key1][key2]['input_ids']).unsqueeze(0), torch.tensor(self.news2dict[key1][key2]['attention_mask']).unsqueeze(0)], dim=0)
-#                     # self.news2dict[key1][key2] = torch.stack([torch.tensor(self.news2dict[key1][key2]['input_ids']), torch.tensor(self.news2dict[key1][key2]['attention_mask'])])
-
-#                     if key2 == 'title':
-#                         self.news2dict[key1]['title_mask'] = torch.tensor(self.news2dict[key1][key2]['attention_mask'])
-#                     elif key2 == 'abstract':
-#                         self.news2dict[key1]['abstract_mask'] = torch.tensor(self.news2dict[key1][key2]['attention_mask'])
-#                     self.news2dict[key1][key2] = torch.tensor(self.news2dict[key1][key2]['input_ids'])
-
-#                 elif key2 in ['title_mask', 'abstract_mask']:
-#                     pass
-#                 else:
-#                     self.news2dict[key1][key2] = torch.tensor(self.news2dict[key1][key2])
-
-#         padding_all = {
-#             'category': 0,
-#             'subcategory': 0,
-#             'title': [0] * config.num_words_title,  # Keeping title as an empty string for consistency in handling text
-#             'abstract': [0] * config.num_words_abstract,  # Same for abstract
-#             'title_entities': [0] * config.num_words_title,  # Assuming these are numerical lists
-#             'abstract_entities': [0] * config.num_words_abstract,
-#             'title_mask': [0] * config.num_words_title,
-#             'abstract_mask': [0] * config.num_words_abstract,
-#         }
-#         for key in padding_all.keys():
-#             padding_all[key] = torch.tensor(padding_all[key])
-
-#         self.padding = {
-#             k: v
-#             for k, v in padding_all.items()
-#             if k in config.dataset_attributes['news']
-#         }
+def _parse_tokenized_title(title_str: str) -> torch.Tensor:
+    """Parse tokenized title string to tensor.
     
-#     def __len__(self):
-#         return len(self.behaviors_parsed)
+    Args:
+        title_str: String representation of tokenized title
+        
+    Returns:
+        Tensor with shape [2, num_words_title] containing input_ids and attention_mask
+    """
+    title_dict = ast.literal_eval(title_str)
+    input_ids = torch.tensor(title_dict['input_ids'])
+    attention_mask = torch.tensor(title_dict['attention_mask'])
+    return torch.cat([input_ids.unsqueeze(0), attention_mask.unsqueeze(0)], dim=0)
 
-#     def __getitem__(self, idx):
-#         item = {}
-#         row = self.behaviors_parsed.iloc[idx]
-#         if 'user' in config.dataset_attributes['record']:
-#             item['user'] = row.user
-#         item["clicked"] = list(map(int, row.clicked.split()))
-#         item["candidate_news"] = [
-#             self.news2dict[x] for x in row.candidate_news.split()
-#         ]
-#         item["clicked_news"] = [
-#             self.news2dict[x]
-#             for x in row.clicked_news.split()[:config.num_clicked_news_a_user]
-#         ]
-#         if 'clicked_news_length' in config.dataset_attributes['record']:
-#             item['clicked_news_length'] = len(item["clicked_news"])
-#         repeated_times = config.num_clicked_news_a_user - \
-#             len(item["clicked_news"])
-#         assert repeated_times >= 0
-#         item["clicked_news"] = [self.padding
-#                                 ] * repeated_times + item["clicked_news"]
 
-#         return item
-
+def _create_padding_token(num_words_title: int) -> torch.Tensor:
+    """Create padding token for title.
+    
+    Args:
+        num_words_title: Maximum number of words in title
+        
+    Returns:
+        Padding tensor with shape [2, num_words_title]
+    """
+    # [CLS] and [SEP] tokens: [101, 102] with masks [1, 1]
+    cls_sep_tokens = [[101, 102], [1, 1]]
+    padding = [tokens + [0] * (num_words_title - 2) for tokens in cls_sep_tokens]
+    return torch.tensor(padding)
 
 
 class BaseDataset(Dataset):
-    def __init__(self, behaviors_path, news_path, config):
-        super(BaseDataset, self).__init__()
-        self.config = config
-        assert all(attribute in [
-            'category', 'subcategory', 'title', 'abstract', 'title_entities',
-            'abstract_entities'
-        ] for attribute in config.dataset_attributes['news'])
-        assert all(attribute in ['user', 'clicked_news_length']
-                   for attribute in config.dataset_attributes['record'])
-
-        self.behaviors_parsed = pd.read_table(behaviors_path)
-
-        self.news_parsed = pd.read_table(
-            news_path,
-            index_col='id',
-            usecols=['id'] + config.dataset_attributes['news'],
-            converters={
-                attribute: literal_eval
-                for attribute in set(config.dataset_attributes['news']) & set([
-                    'title_entities', 'abstract_entities'
-                    ])
-            })
-
-        self.news_id2int = {x: i for i, x in enumerate(self.news_parsed.index)}
-        self.news2dict = self.news_parsed.to_dict('index')
-
-
-        for key1 in self.news2dict.keys():
-            keys_to_iterate = list(self.news2dict[key1].keys())
-            for key2 in keys_to_iterate:
-                if key2 in ['title', 'abstract']:
-                    self.news2dict[key1][key2] = ast.literal_eval(self.news2dict[key1][key2])
-                    assert torch.tensor(self.news2dict[key1][key2]['input_ids']).shape == torch.tensor(self.news2dict[key1][key2]['attention_mask']).shape
-                    self.news2dict[key1][key2] = torch.cat([torch.tensor(self.news2dict[key1][key2]['input_ids']).unsqueeze(0), torch.tensor(self.news2dict[key1][key2]['attention_mask']).unsqueeze(0)], dim=0)
-
-                else:
-                    self.news2dict[key1][key2] = torch.tensor(self.news2dict[key1][key2])
-
-        padding_all = {
-            'category': 0,
-            'subcategory': 0,
-            'title': [tokens + [0] * (config.num_words_title - 2) for tokens in [[101, 102], [1, 1]]],  # Keeping title as an empty string for consistency in handling text
-            'abstract': [tokens + [0] * (config.num_words_abstract - 2) for tokens in [[101, 102], [1, 1]]],  # Same for abstract
-            'title_entities': [0] * config.num_words_title,  # Assuming these are numerical lists
-            'abstract_entities': [0] * config.num_words_abstract,
-        }
-        for key in padding_all.keys():
-            padding_all[key] = torch.tensor(padding_all[key])
-
-        self.padding = {
-            k: v
-            for k, v in padding_all.items()
-            if k in config.dataset_attributes['news']
-        }
+    """Dataset for training NRMSbert model."""
     
-    def __len__(self):
+    def __init__(self, behaviors_path: Union[Path, str], news_path: Union[Path, str]) -> None:
+        """Initialize dataset.
+        
+        Args:
+            behaviors_path: Path to parsed behaviors TSV file
+            news_path: Path to parsed news TSV file
+        """
+        super().__init__()
+        
+        # Convert Path objects to strings for pandas
+        behaviors_path_str = str(behaviors_path) if isinstance(behaviors_path, Path) else behaviors_path
+        news_path_str = str(news_path) if isinstance(news_path, Path) else news_path
+        
+        # Check if files exist
+        if not Path(behaviors_path_str).exists():
+            raise FileNotFoundError(f"Behaviors file not found: {behaviors_path_str}")
+        if not Path(news_path_str).exists():
+            raise FileNotFoundError(f"News file not found: {news_path_str}")
+        
+        self.behaviors_parsed = pd.read_table(behaviors_path_str, sep='\t')
+        
+        # Load news data (only title needed for NRMS)
+        self.news_parsed = pd.read_table(
+            news_path_str,
+            sep='\t',
+            index_col='id',
+            usecols=['id', 'title'],
+            converters={'title': literal_eval}
+        )
+        
+        # Convert news to dictionary and parse tokenized titles
+        self.news2dict: Dict[str, Dict[str, torch.Tensor]] = {}
+        for news_id, row in self.news_parsed.iterrows():
+            self.news2dict[news_id] = {
+                'title': _parse_tokenized_title(str(row['title']))
+            }
+        
+        # Create padding token
+        self.padding = {'title': _create_padding_token(config.num_words_title)}
+    
+    def __len__(self) -> int:
+        """Return dataset size."""
         return len(self.behaviors_parsed)
-
-    def __getitem__(self, idx):
-        item = {}
+    
+    def __getitem__(self, idx: int) -> Dict[str, Union[List, torch.Tensor]]:
+        """Get a single training sample.
+        
+        Args:
+            idx: Sample index
+            
+        Returns:
+            Dictionary containing:
+                - clicked: List of clicked labels
+                - candidate_news: List of candidate news dictionaries
+                - clicked_news: List of clicked news dictionaries
+                - clicked_news_mask: List of mask values (0 for padding, 1 for real)
+        """
         row = self.behaviors_parsed.iloc[idx]
-        if 'user' in config.dataset_attributes['record']:
-            item['user'] = row.user
-        item["clicked"] = list(map(int, row.clicked.split()))
-        item["candidate_news"] = [
-            self.news2dict[x] for x in row.candidate_news.split()
+        
+        # Parse clicked labels
+        clicked = [int(x) for x in row.clicked.split()]
+        
+        # Get candidate news
+        candidate_news = [
+            self.news2dict[news_id]
+            for news_id in row.candidate_news.split()
         ]
-        item["clicked_news"] = [
-            self.news2dict[x]
-            for x in row.clicked_news.split()[:config.num_clicked_news_a_user]
+        
+        # Get clicked news (limit to num_clicked_news_a_user)
+        clicked_news_ids = row.clicked_news.split()[:config.num_clicked_news_a_user]
+        clicked_news = [
+            self.news2dict[news_id]
+            for news_id in clicked_news_ids
         ]
-        if 'clicked_news_length' in config.dataset_attributes['record']:
-            item['clicked_news_length'] = len(item["clicked_news"])
-        clicked_times = len(item["clicked_news"])
-        repeated_times = config.num_clicked_news_a_user - \
-            len(item["clicked_news"])
-        assert repeated_times >= 0
-        item["clicked_news"] = [self.padding
-                                ] * repeated_times + item["clicked_news"]
-        item["clicked_news_mask"] = [0] * repeated_times + [1] * clicked_times
-        return item
+        
+        # Pad clicked news to fixed length
+        clicked_times = len(clicked_news)
+        repeated_times = config.num_clicked_news_a_user - clicked_times
+        assert repeated_times >= 0, f"Too many clicked news: {clicked_times}"
+        
+        clicked_news = [self.padding] * repeated_times + clicked_news
+        clicked_news_mask = [0] * repeated_times + [1] * clicked_times
+        
+        return {
+            'clicked': clicked,
+            'candidate_news': candidate_news,
+            'clicked_news': clicked_news,
+            'clicked_news_mask': clicked_news_mask,
+        }

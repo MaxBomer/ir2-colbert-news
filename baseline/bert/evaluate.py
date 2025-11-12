@@ -1,500 +1,545 @@
-import numpy as np
-from sklearn.metrics import roc_auc_score
-from tqdm import tqdm
-import torch
-from config import model_name
-from torch.utils.data import Dataset, DataLoader
-from os import path
-import sys
-import pandas as pd
-from ast import literal_eval
-import importlib
-from multiprocessing import Pool
-import os
-from utils import pretrained_encode_bert, pretrained_encode_glove, pretrained_encode_llama
-from utils import save_news_dataset, load_news_dataset
+"""Evaluation script for NRMSbert model."""
 import ast
+import logging
+import sys
+from dataclasses import dataclass
+from multiprocessing import Pool
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Union
 
-try:
-    Model = getattr(importlib.import_module(f"model.{model_name}"), model_name)
-    config = getattr(importlib.import_module('config'), f"{model_name}Config")
-except AttributeError:
-    print(f"{model_name} not included!")
-    exit()
+import numpy as np
+import pandas as pd
+import torch
+from ast import literal_eval
+from sklearn.metrics import roc_auc_score
+from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+from config import config
+from model.base import BaseNewsRecommendationModel
+from model.factory import create_model
+from utils import load_news_dataset, save_news_dataset, should_pin_memory, get_device, should_display_progress
 
-def should_display_progress():
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+def should_display_progress() -> bool:
+    """Check if progress bars should be displayed."""
     return sys.stdout.isatty()
 
-def dcg_score(y_true, y_score, k=10):
+
+def dcg_score(y_true: np.ndarray, y_score: np.ndarray, k: int = 10) -> float:
+    """Calculate Discounted Cumulative Gain.
+    
+    Args:
+        y_true: True relevance scores
+        y_score: Predicted scores
+        k: Top k items to consider
+        
+    Returns:
+        DCG score
+    """
     order = np.argsort(y_score)[::-1]
-    y_true = np.take(y_true, order[:k])
-    gains = 2**y_true - 1
-    discounts = np.log2(np.arange(len(y_true)) + 2)
-    return np.sum(gains / discounts)
+    y_true_ordered = np.take(y_true, order[:k])
+    gains = 2**y_true_ordered - 1
+    discounts = np.log2(np.arange(len(y_true_ordered)) + 2)
+    return float(np.sum(gains / discounts))
 
 
-def ndcg_score(y_true, y_score, k=10):
+def ndcg_score(y_true: np.ndarray, y_score: np.ndarray, k: int = 10) -> float:
+    """Calculate Normalized Discounted Cumulative Gain.
+    
+    Args:
+        y_true: True relevance scores
+        y_score: Predicted scores
+        k: Top k items to consider
+        
+    Returns:
+        nDCG score
+    """
     best = dcg_score(y_true, y_true, k)
+    if best == 0:
+        return 0.0
     actual = dcg_score(y_true, y_score, k)
     return actual / best
 
 
-def mrr_score(y_true, y_score):
+def mrr_score(y_true: np.ndarray, y_score: np.ndarray) -> float:
+    """Calculate Mean Reciprocal Rank.
+    
+    Args:
+        y_true: True relevance scores
+        y_score: Predicted scores
+        
+    Returns:
+        MRR score
+    """
     order = np.argsort(y_score)[::-1]
-    y_true = np.take(y_true, order)
-    rr_score = y_true / (np.arange(len(y_true)) + 1)
-    return np.sum(rr_score) / np.sum(y_true)
+    y_true_ordered = np.take(y_true, order)
+    rr_scores = y_true_ordered / (np.arange(len(y_true_ordered)) + 1)
+    sum_true = np.sum(y_true_ordered)
+    if sum_true == 0:
+        return 0.0
+    return float(np.sum(rr_scores) / sum_true)
 
 
-def value2rank(d):
-    values = list(d.values())
-    ranks = [sorted(values, reverse=True).index(x) for x in values]
-    return {k: ranks[i] + 1 for i, k in enumerate(d.keys())}
-
-class NewsDataset(Dataset):
+def calculate_single_user_metric(pair: Tuple[List[int], List[float]]) -> List[float]:
+    """Calculate metrics for a single user.
+    
+    Args:
+        pair: Tuple of (y_true, y_pred)
+        
+    Returns:
+        List of [AUC, MRR, nDCG@5, nDCG@10]
     """
-    Load news for evaluation.
-    """
-    def __init__(self, news_path):
-        super(NewsDataset, self).__init__()
-        self.news_parsed = pd.read_table(
-            news_path,
-            usecols=['id'] + config.dataset_attributes['news'],
-            converters={
-                attribute: literal_eval
-                for attribute in set(config.dataset_attributes['news']) & set([
-                    'title_entities', 'abstract_entities'
-                ])
-            })
-
-        self.news2dict = self.news_parsed.to_dict('index')
-
-        for key1 in self.news2dict.keys():
-            keys_to_iterate = list(self.news2dict[key1].keys())
-            for key2 in keys_to_iterate:
-                if key2 in ['title', 'abstract']:
-                    self.news2dict[key1][key2] = ast.literal_eval(self.news2dict[key1][key2])
-                    assert torch.tensor(self.news2dict[key1][key2]['input_ids']).shape == torch.tensor(self.news2dict[key1][key2]['attention_mask']).shape
-                    self.news2dict[key1][key2] = torch.cat([torch.tensor(self.news2dict[key1][key2]['input_ids']).unsqueeze(0), torch.tensor(self.news2dict[key1][key2]['attention_mask']).unsqueeze(0)], dim=0)
-                elif type(self.news2dict[key1][key2]) != str:
-                    self.news2dict[key1][key2] = torch.tensor(
-                        self.news2dict[key1][key2])
-
-    def __len__(self):
-        return len(self.news2dict)
-
-    def __getitem__(self, idx):
-        item = self.news2dict[idx]
-        return item
-
-class UserDataset(Dataset):
-    """
-    Load users for evaluation, duplicated rows will be dropped
-    """
-    def __init__(self, behaviors_path, user2int_path):
-        super(UserDataset, self).__init__()
-        self.behaviors = pd.read_table(behaviors_path,
-                                       header=None,
-                                       usecols=[1, 3],
-                                       names=['user', 'clicked_news'])
-        # self.behaviors.clicked_news.fillna(' ', inplace=True)
-        self.behaviors['clicked_news'] = self.behaviors['clicked_news'].fillna(' ')
-        self.behaviors.drop_duplicates(inplace=True)
-        user2int = dict(pd.read_table(user2int_path).values.tolist())
-        user_total = 0
-        user_missed = 0
-        for row in self.behaviors.itertuples():
-            user_total += 1
-            if row.user in user2int:
-                self.behaviors.at[row.Index, 'user'] = user2int[row.user]
-            else:
-                user_missed += 1
-                self.behaviors.at[row.Index, 'user'] = 0
-        if model_name == 'LSTUR' or model_name == 'LSTURlinear' or model_name== 'LSTURbert':
-            print(f'User miss rate: {user_missed/user_total:.4f}')
-
-    def __len__(self):
-        return len(self.behaviors)
-
-    def __getitem__(self, idx):
-        row = self.behaviors.iloc[idx]
-        item = {
-            "user":
-            row.user,
-            "clicked_news_string":
-            row.clicked_news,
-            "clicked_news":
-            row.clicked_news.split()[:config.num_clicked_news_a_user]
-        }
-        item['clicked_news_length'] = len(item["clicked_news"])
-        repeated_times = config.num_clicked_news_a_user - len(
-            item["clicked_news"])
-        assert repeated_times >= 0
-        item["clicked_news"] = ['PADDED_NEWS'
-                                ] * repeated_times + item["clicked_news"]
-
-        return item
-
-
-class BehaviorsDataset(Dataset):
-    """
-    Load behaviors for evaluation, (user, time) pair as session
-    """
-    def __init__(self, behaviors_path):
-        super(BehaviorsDataset, self).__init__()
-        self.behaviors = pd.read_table(behaviors_path,
-                                       header=None,
-                                       usecols=range(5),
-                                       names=[
-                                           'impression_id', 'user', 'time',
-                                           'clicked_news', 'impressions'
-                                       ])
-        # self.behaviors.clicked_news.fillna(' ', inplace=True)
-        self.behaviors['clicked_news'] = self.behaviors['clicked_news'].fillna(' ')
-        self.behaviors.impressions = self.behaviors.impressions.str.split()
-
-    def __len__(self):
-        return len(self.behaviors)
-
-    def __getitem__(self, idx):
-        row = self.behaviors.iloc[idx]
-        item = {
-            "impression_id": row.impression_id,
-            "user": row.user,
-            "time": row.time,
-            "clicked_news_string": row.clicked_news,
-            "impressions": row.impressions
-        }
-        return item
-
-
-def calculate_single_user_metric(pair):
+    y_true, y_pred = pair
     try:
-        auc = roc_auc_score(*pair)
-        mrr = mrr_score(*pair)
-        ndcg5 = ndcg_score(*pair, 5)
-        ndcg10 = ndcg_score(*pair, 10)
+        auc = roc_auc_score(y_true, y_pred)
+        mrr = mrr_score(np.array(y_true), np.array(y_pred))
+        ndcg5 = ndcg_score(np.array(y_true), np.array(y_pred), k=5)
+        ndcg10 = ndcg_score(np.array(y_true), np.array(y_pred), k=10)
         return [auc, mrr, ndcg5, ndcg10]
     except ValueError:
         return [np.nan] * 4
 
 
-@torch.no_grad()
-def evaluate_popular(model, directory, num_workers, news_dataset_built=None, max_count=sys.maxsize, num_groups=5):
-    """
-    Evaluate model on target directory, output user group AUC, MRR, nDCG@5, nDCG@10 based on interaction popularity.
+def _parse_tokenized_title(title_str: str) -> torch.Tensor:
+    """Parse tokenized title string to tensor.
     
     Args:
-        model: model to be evaluated
-        directory: the directory that contains two files (behaviors.tsv, news_parsed.tsv)
-        num_workers: processes number for calculating metrics
-        num_groups: Number of groups to divide users by popularity (default 5 means 0-20%, 20-40%, 40-60%, 60-80%, 80-100%)
+        title_str: String representation of tokenized title
+        
     Returns:
-        A dictionary containing evaluation metrics for each user group
+        Tensor with shape [2, num_words_title]
     """
-    if news_dataset_built:
-        news_dataset = news_dataset_built
-    else:
-        news_dataset = NewsDataset(path.join(directory, 'news_parsed.tsv'))
-    news_dataloader = DataLoader(news_dataset,
-                                 batch_size=config.batch_size * 16,
-                                 shuffle=False,
-                                 num_workers=config.num_workers,
-                                 drop_last=False,
-                                 pin_memory=True)
+    title_dict = ast.literal_eval(title_str)
+    input_ids = torch.tensor(title_dict['input_ids'])
+    attention_mask = torch.tensor(title_dict['attention_mask'])
+    return torch.cat([input_ids.unsqueeze(0), attention_mask.unsqueeze(0)], dim=0)
 
-    news2vector = {}
-    progress = news_dataloader
-    if should_display_progress():
-        progress = tqdm(progress, desc="Calculating vectors for news")
+
+class NewsDataset(Dataset):
+    """Dataset for loading news articles during evaluation."""
+    
+    def __init__(self, news_path: Union[Path, str]) -> None:
+        """Initialize news dataset.
+        
+        Args:
+            news_path: Path to parsed news TSV file
+        """
+        super().__init__()
+        
+        # Convert Path object to string for pandas
+        news_path_str = str(news_path) if isinstance(news_path, Path) else news_path
+        
+        # Check if file exists
+        if not Path(news_path_str).exists():
+            raise FileNotFoundError(f"News file not found: {news_path_str}")
+        
+        self.news_parsed = pd.read_table(
+            news_path_str,
+            sep='\t',
+            usecols=['id', 'title'],
+            converters={'title': literal_eval}
+        )
+        
+        self.news2dict: Dict[int, Dict[str, torch.Tensor]] = {}
+        for idx, (_, row) in enumerate(self.news_parsed.iterrows()):
+            self.news2dict[idx] = {
+                'id': row['id'],
+                'title': _parse_tokenized_title(str(row['title']))
+            }
+    
+    def __len__(self) -> int:
+        """Return dataset size."""
+        return len(self.news2dict)
+    
+    def __getitem__(self, idx: int) -> Dict[str, Union[torch.Tensor, str]]:
+        """Get a news article.
+        
+        Args:
+            idx: Article index
+            
+        Returns:
+            Dictionary containing 'id' and 'title'
+        """
+        return self.news2dict[idx]
+
+
+class UserDataset(Dataset):
+    """Dataset for loading user click histories during evaluation."""
+    
+    def __init__(self, behaviors_path: Union[Path, str], user2int_path: Union[Path, str]) -> None:
+        """Initialize user dataset.
+        
+        Args:
+            behaviors_path: Path to behaviors TSV file
+            user2int_path: Path to user2int mapping file
+        """
+        super().__init__()
+        
+        # Convert Path objects to strings for pandas
+        behaviors_path_str = str(behaviors_path) if isinstance(behaviors_path, Path) else behaviors_path
+        user2int_path_str = str(user2int_path) if isinstance(user2int_path, Path) else user2int_path
+        
+        # Check if files exist
+        if not Path(behaviors_path_str).exists():
+            raise FileNotFoundError(f"Behaviors file not found: {behaviors_path_str}")
+        if not Path(user2int_path_str).exists():
+            raise FileNotFoundError(f"User2int file not found: {user2int_path_str}")
+        
+        self.behaviors = pd.read_table(
+            behaviors_path_str,
+            sep='\t',
+            header=None,
+            usecols=[1, 3],
+            names=['user', 'clicked_news']
+        )
+        self.behaviors['clicked_news'] = self.behaviors['clicked_news'].fillna(' ')
+        self.behaviors.drop_duplicates(inplace=True)
+        
+        user2int = dict(pd.read_table(user2int_path_str, sep='\t').values.tolist())
+        
+        for row in self.behaviors.itertuples():
+            self.behaviors.at[row.Index, 'user'] = user2int.get(row.user, 0)
+    
+    def __len__(self) -> int:
+        """Return dataset size."""
+        return len(self.behaviors)
+    
+    def __getitem__(self, idx: int) -> Dict[str, Union[List[str], str]]:
+        """Get a user's click history.
+        
+        Args:
+            idx: User index
+            
+        Returns:
+            Dictionary containing 'clicked_news_string' and 'clicked_news'
+        """
+        row = self.behaviors.iloc[idx]
+        clicked_news = row.clicked_news.split()[:config.num_clicked_news_a_user]
+        repeated_times = config.num_clicked_news_a_user - len(clicked_news)
+        assert repeated_times >= 0
+        
+        return {
+            "clicked_news_string": row.clicked_news,
+            "clicked_news": ['PADDED_NEWS'] * repeated_times + clicked_news,
+        }
+
+
+class BehaviorsDataset(Dataset):
+    """Dataset for loading user behaviors during evaluation."""
+    
+    def __init__(self, behaviors_path: Union[Path, str]) -> None:
+        """Initialize behaviors dataset.
+        
+        Args:
+            behaviors_path: Path to behaviors TSV file
+        """
+        super().__init__()
+        
+        # Convert Path object to string for pandas
+        behaviors_path_str = str(behaviors_path) if isinstance(behaviors_path, Path) else behaviors_path
+        
+        # Check if file exists
+        if not Path(behaviors_path_str).exists():
+            raise FileNotFoundError(f"Behaviors file not found: {behaviors_path_str}")
+        
+        self.behaviors = pd.read_table(
+            behaviors_path_str,
+            sep='\t',
+            header=None,
+            usecols=range(5),
+            names=['impression_id', 'user', 'time', 'clicked_news', 'impressions']
+        )
+        self.behaviors['clicked_news'] = self.behaviors['clicked_news'].fillna(' ')
+        self.behaviors.impressions = self.behaviors.impressions.str.split()
+    
+    def __len__(self) -> int:
+        """Return dataset size."""
+        return len(self.behaviors)
+    
+    def __getitem__(self, idx: int) -> Dict[str, Union[List[str], str]]:
+            """Get a behavior record.
+            
+            Args:
+                idx: Record index
+                
+            Returns:
+                Dictionary containing impression data
+            """
+            row = self.behaviors.iloc[idx]
+            return {
+                "impression_id": row.impression_id,
+                "user": row.user,
+                "time": row.time,
+                "clicked_news_string": row.clicked_news,
+                "impressions": row.impressions
+            }
+
+
+@dataclass
+class EvaluationConfig:
+    """Configuration for evaluation."""
+    batch_size_multiplier: int = 16
+    max_count: int = sys.maxsize
+
+
+def compute_news_vectors(model: BaseNewsRecommendationModel, news_dataset: NewsDataset, device: torch.device, eval_config: EvaluationConfig) -> Dict[str, torch.Tensor]:
+    """Compute news article vectors.
+    
+    Args:
+        model: Model instance
+        news_dataset: News dataset
+        device: Device to run on
+        eval_config: Evaluation configuration
+        
+    Returns:
+        Dictionary mapping news IDs to vectors
+    """
+    news_dataloader = DataLoader(
+        news_dataset,
+        batch_size=config.batch_size * eval_config.batch_size_multiplier,
+        shuffle=False,
+        num_workers=config.num_workers,
+        drop_last=False,
+        pin_memory=should_pin_memory(device)
+    )
+    
+    news2vector: Dict[str, torch.Tensor] = {}
+    progress = tqdm(news_dataloader, desc="Computing news vectors") if should_display_progress() else news_dataloader
+    
     for minibatch in progress:
-        news_ids = minibatch["id"]
-        if any(id not in news2vector for id in news_ids):
-            news_vector = model.get_news_vector(minibatch)
-            for id, vector in zip(news_ids, news_vector):
-                if id not in news2vector:
-                    news2vector[id] = vector
-
-    news2vector['PADDED_NEWS'] = torch.zeros(list(news2vector.values())[0].size())
-
-    user_dataset = UserDataset(path.join(directory, 'behaviors.tsv'),
-                               path.join(config.original_data_path, 'train/user2int.tsv'))
-    user_dataloader = DataLoader(user_dataset,
-                                 batch_size=config.batch_size * 16,
-                                 shuffle=False,
-                                 num_workers=config.num_workers,
-                                 drop_last=False,
-                                 pin_memory=True)
-
-    # Calculate user interaction counts (clicked_news_length directly gives the number of clicked news)
-    user_interaction_count = {}
-    for minibatch in user_dataloader:
-        for user_string, clicked_length in zip(minibatch["clicked_news_string"], minibatch["clicked_news_length"]):
-            user_interaction_count[user_string] = clicked_length.item()
-
-    # Define percentile groups
-    sorted_users = sorted(user_interaction_count.items(), key=lambda x: x[1])
-    percentiles = [20, 40, 60, 80, 100]
-    user_percentiles = np.percentile([x[1] for x in sorted_users], percentiles)
-
-    # Create user groups
-    user_groups = {
-        '0-20%': [],
-        '20-40%': [],
-        '40-60%': [],
-        '60-80%': [],
-        '80-100%': [],
-        '0-50%': [],
-        '50-100%': [],
-        'Cold (≤ 5 clicks)': [],
-        'Heavy (≥ 5 clicks)': []
-    }
-
-    for user, count in user_interaction_count.items():
-        if count <= 5:
-            user_groups["Cold (≤ 5 clicks)"].append(user)
+        # Handle both single items and batches
+        # DataLoader automatically stacks tensors when batching, so check if title is already a tensor
+        if isinstance(minibatch['id'], (list, tuple)):
+            news_ids = list(minibatch['id'])
+            # If title is already a tensor (batched), use it directly; otherwise stack
+            if isinstance(minibatch['title'], torch.Tensor):
+                titles = minibatch['title']
+            else:
+                titles = torch.stack(minibatch['title'])
         else:
-            user_groups["Heavy (≥ 5 clicks)"].append(user)
+            news_ids = [minibatch['id']]
+            titles = minibatch['title'].unsqueeze(0)
+        
+        batch_dict = {'title': titles}
+        
+        if any(news_id not in news2vector for news_id in news_ids):
+            news_vectors = model.get_news_vector(batch_dict)
+            if len(news_ids) == 1:
+                news_vectors = news_vectors.unsqueeze(0)
+            for news_id, vector in zip(news_ids, news_vectors):
+                if news_id not in news2vector:
+                    news2vector[news_id] = vector
+    
+    # Add padding vector
+    if news2vector:
+        padding_vector = torch.zeros_like(list(news2vector.values())[0])
+        news2vector['PADDED_NEWS'] = padding_vector
+    
+    return news2vector
 
-        if count <= user_percentiles[0]:
-            user_groups['0-20%'].append(user)
-        elif count <= user_percentiles[1]:
-            user_groups['20-40%'].append(user)
-        elif count <= user_percentiles[2]:
-            user_groups['40-60%'].append(user)
-        elif count <= user_percentiles[3]:
-            user_groups['60-80%'].append(user)
-        else:
-            user_groups['80-100%'].append(user)
 
-        # Create 0-50% and 50-100% groups
-        if count <= np.percentile([x[1] for x in sorted_users], 50):
-            user_groups['0-50%'].append(user)
-        else:
-            user_groups['50-100%'].append(user)
-
-    # Initialize metrics dictionary
-    group_metrics = {group: {"auc": [], "mrr": [], "ndcg5": [], "ndcg10": []} for group in user_groups}
-
-    # Initialize user2vector dictionary
-    user2vector = {}
-    progress = user_dataloader
-    if should_display_progress():
-        progress = tqdm(progress, desc="Calculating vectors for users")
+def compute_user_vectors(model: BaseNewsRecommendationModel, user_dataset: UserDataset, news2vector: Dict[str, torch.Tensor], device: torch.device, eval_config: EvaluationConfig) -> Dict[str, torch.Tensor]:
+    """Compute user vectors from click histories.
+    
+    Args:
+        model: Model instance
+        user_dataset: User dataset
+        news2vector: Dictionary mapping news IDs to vectors
+        device: Device to run on
+        eval_config: Evaluation configuration
+        
+    Returns:
+        Dictionary mapping user strings to vectors
+    """
+    user_dataloader = DataLoader(
+        user_dataset,
+        batch_size=config.batch_size * eval_config.batch_size_multiplier,
+        shuffle=False,
+        num_workers=config.num_workers,
+        drop_last=False,
+        pin_memory=should_pin_memory(device)
+    )
+    
+    user2vector: Dict[str, torch.Tensor] = {}
+    progress = tqdm(user_dataloader, desc="Computing user vectors") if should_display_progress() else user_dataloader
     
     for minibatch in progress:
         user_strings = minibatch["clicked_news_string"]
+        
         if any(user_string not in user2vector for user_string in user_strings):
-            clicked_news_vector = torch.stack([
-                torch.stack([news2vector[x].to(device) for x in news_list], dim=0) 
+            clicked_news_vectors = torch.stack([
+                torch.stack([
+                    news2vector[news_id].to(device) for news_id in news_list
+                ], dim=0)
                 for news_list in minibatch["clicked_news"]
             ], dim=0).transpose(0, 1)
             
-            # if model_name in ['LSTUR', 'LSTURlinear', 'LSTURbert', 'LSTURllama']:
-            #     user_vector = model.get_user_vector(
-            #         minibatch['user'], minibatch['clicked_news_length'], clicked_news_vector
-            #     )
-            # else:
-            user_vector = model.get_user_vector(clicked_news_vector)
-                
-            for user_string, vector in zip(user_strings, user_vector):
+            user_vectors = model.get_user_vector(clicked_news_vectors)
+            
+            for user_string, vector in zip(user_strings, user_vectors):
                 if user_string not in user2vector:
                     user2vector[user_string] = vector
+    
+    return user2vector
 
-    behaviors_dataset = BehaviorsDataset(path.join(directory, 'behaviors.tsv'))
-    behaviors_dataloader = DataLoader(behaviors_dataset,
-                                      batch_size=1,
-                                      shuffle=False,
-                                      num_workers=config.num_workers)
 
-    count = 0
-    progress = behaviors_dataloader
-    if should_display_progress():
-        progress = tqdm(progress, desc="Calculating probabilities")
+@dataclass
+class EvaluationParams:
+    """Parameters for evaluation function."""
+    directory: Union[Path, str]
+    num_workers: int
+    news_dataset_built: Optional[NewsDataset] = None
+    max_count: int = sys.maxsize
 
-    # Calculate metrics for each user group
-    for minibatch in progress:
-        count += 1
-        if count == max_count:
+
+@torch.no_grad()
+def evaluate(model: BaseNewsRecommendationModel, params: EvaluationParams) -> Tuple[float, float, float, float]:
+    """Evaluate model on target directory.
+    
+    Args:
+        model: Model to be evaluated
+        params: Evaluation parameters
+        
+    Returns:
+        Tuple of (AUC, MRR, nDCG@5, nDCG@10)
+    """
+    device = next(model.parameters()).device
+    directory = Path(params.directory)
+    eval_config = EvaluationConfig(max_count=params.max_count)
+    
+    # Load or use provided news dataset
+    if params.news_dataset_built is not None:
+        news_dataset = params.news_dataset_built
+    else:
+        news_dataset = NewsDataset(directory / 'news_parsed.tsv')
+    
+    # Compute news vectors
+    news2vector = compute_news_vectors(model, news_dataset, device, eval_config)
+    
+    # Load user dataset
+    user_dataset = UserDataset(
+        directory / 'behaviors.tsv',
+        config.train_data_path / 'user2int.tsv'
+    )
+    
+    # Compute user vectors
+    user2vector = compute_user_vectors(model, user_dataset, news2vector, device, eval_config)
+    
+    # Load behaviors dataset
+    behaviors_dataset = BehaviorsDataset(directory / 'behaviors.tsv')
+    behaviors_dataloader = DataLoader(
+        behaviors_dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=config.num_workers
+    )
+    
+    # Compute predictions and metrics
+    tasks = []
+    progress = tqdm(behaviors_dataloader, desc="Computing predictions") if should_display_progress() else behaviors_dataloader
+    
+    for count, minibatch in enumerate(progress, 1):
+        if count > params.max_count:
             break
-
-        candidate_news_vector = torch.stack([news2vector[news[0].split('-')[0]] for news in minibatch['impressions']], dim=0)
+        
         user_string = minibatch['clicked_news_string'][0]
         if user_string not in user2vector:
             continue
-
-        user_vector = user2vector[user_string]
-        click_probability = model.get_prediction(candidate_news_vector, user_vector)
-        y_pred = click_probability.tolist()
-        y_true = [int(news[0].split('-')[1]) for news in minibatch['impressions']]
-
-        for group, users in user_groups.items():
-            if user_string in users:
-                auc, mrr, ndcg5, ndcg10 = calculate_single_user_metric((y_true, y_pred))
-                group_metrics[group]["auc"].append(auc)
-                group_metrics[group]["mrr"].append(mrr)
-                group_metrics[group]["ndcg5"].append(ndcg5)
-                group_metrics[group]["ndcg10"].append(ndcg10)
-    
-    # Calculate average metrics for each group
-    final_metrics = {}
-    for group, metrics in group_metrics.items():
-        final_metrics[group] = {
-            "auc": np.nanmean(metrics["auc"]),
-            "mrr": np.nanmean(metrics["mrr"]),
-            "ndcg5": np.nanmean(metrics["ndcg5"]),
-            "ndcg10": np.nanmean(metrics["ndcg10"]),
-            "user_count": len(user_groups[group])
-        }
-
-    # Print the results
-    for group, metrics in final_metrics.items():
-        print(f"Group {group}: User Count = {metrics['user_count']}")
-        print(f"AUC: {metrics['auc']:.4f}, MRR: {metrics['mrr']:.4f}, nDCG@5: {metrics['ndcg5']:.4f}, nDCG@10: {metrics['ndcg10']:.4f}\n")
-
-    return final_metrics
-
-@torch.no_grad()
-def evaluate(model, directory, num_workers, news_dataset_built=None, max_count=sys.maxsize):
-    """
-    Evaluate model on target directory.
-    Args:
-        model: model to be evaluated
-        directory: the directory that contains two files (behaviors.tsv, news_parsed.tsv)
-        num_workers: processes number for calculating metrics
-    Returns:
-        AUC
-        MRR
-        nDCG@5
-        nDCG@10
-    """
-    if news_dataset_built:
-        news_dataset = news_dataset_built
-    else:
-        news_dataset = NewsDataset(path.join(directory, 'news_parsed.tsv'))
-    news_dataloader = DataLoader(news_dataset,
-                                 batch_size=config.batch_size * 16,
-                                 shuffle=False,
-                                 num_workers=config.num_workers,
-                                 drop_last=False,
-                                 pin_memory=True)
-
-    news2vector = {}
-    progress = news_dataloader
-    if should_display_progress():
-        progress = tqdm(progress, desc="Calculating vectors for news")
-    for minibatch in progress:
-        news_ids = minibatch["id"]
-        if any(id not in news2vector for id in news_ids):
-            news_vector = model.get_news_vector(minibatch)
-            for id, vector in zip(news_ids, news_vector):
-                if id not in news2vector:
-                    news2vector[id] = vector
-
-    news2vector['PADDED_NEWS'] = torch.zeros(
-        list(news2vector.values())[0].size())
-
-    user_dataset = UserDataset(path.join(directory, 'behaviors.tsv'),
-                               path.join(config.original_data_path, 'train/user2int.tsv'))
-    user_dataloader = DataLoader(user_dataset,
-                                 batch_size=config.batch_size * 16,
-                                 shuffle=False,
-                                 num_workers=config.num_workers,
-                                 drop_last=False,
-                                 pin_memory=True)
-
-    user2vector = {}
-    progress = user_dataloader
-    if should_display_progress():
-        progress = tqdm(progress, desc="Calculating vectors for users")
-    for minibatch in progress:
-        user_strings = minibatch["clicked_news_string"]
-        if any(user_string not in user2vector for user_string in user_strings):
-            clicked_news_vector = torch.stack([
-                torch.stack([news2vector[x].to(device) for x in news_list],
-                            dim=0) for news_list in minibatch["clicked_news"]
-            ],
-                                              dim=0).transpose(0, 1)
-            if model_name == 'LSTUR' or model_name == 'LSTURlinear' or model_name== 'LSTURbert':
-                user_vector = model.get_user_vector(
-                    minibatch['user'], minibatch['clicked_news_length'],
-                    clicked_news_vector)
-            else:
-                user_vector = model.get_user_vector(clicked_news_vector)
-            for user, vector in zip(user_strings, user_vector):
-                if user not in user2vector:
-                    user2vector[user] = vector
-
-    behaviors_dataset = BehaviorsDataset(path.join(directory, 'behaviors.tsv'))
-    behaviors_dataloader = DataLoader(behaviors_dataset,
-                                      batch_size=1,
-                                      shuffle=False,
-                                      num_workers=config.num_workers)
-
-    count = 0
-
-    tasks = []
-    progress = behaviors_dataloader
-    if should_display_progress():
-        progress = tqdm(progress, desc="Calculating probabilities")
-    for minibatch in progress:
-        count += 1
-        if count == max_count:
-            break
-
-        candidate_news_vector = torch.stack([
+        
+        # Get candidate news vectors
+        candidate_news_vectors = torch.stack([
             news2vector[news[0].split('-')[0]]
             for news in minibatch['impressions']
-        ],
-                                            dim=0)
-        user_vector = user2vector[minibatch['clicked_news_string'][0]]
-        click_probability = model.get_prediction(candidate_news_vector,
-                                                 user_vector)
-
-        y_pred = click_probability.tolist()
+        ], dim=0)
+        
+        user_vector = user2vector[user_string]
+        click_probabilities = model.get_prediction(candidate_news_vectors, user_vector)
+        
+        y_pred = click_probabilities.tolist()
         y_true = [
             int(news[0].split('-')[1]) for news in minibatch['impressions']
         ]
-
+        
         tasks.append((y_true, y_pred))
-
-    with Pool(processes=num_workers) as pool:
+    
+    # Calculate metrics in parallel
+    with Pool(processes=params.num_workers) as pool:
         results = pool.map(calculate_single_user_metric, tasks)
-
+    
     aucs, mrrs, ndcg5s, ndcg10s = np.array(results).T
-    return np.nanmean(aucs), np.nanmean(mrrs), np.nanmean(ndcg5s), np.nanmean(
-        ndcg10s)
+    return (
+        float(np.nanmean(aucs)),
+        float(np.nanmean(mrrs)),
+        float(np.nanmean(ndcg5s)),
+        float(np.nanmean(ndcg10s))
+    )
+
+
+def find_latest_checkpoint(checkpoint_dir: Path) -> Optional[Path]:
+    """Find the latest checkpoint file.
+    
+    Args:
+        checkpoint_dir: Directory containing checkpoints
+        
+    Returns:
+        Path to latest checkpoint or None if not found
+    """
+    if not checkpoint_dir.exists():
+        return None
+    
+    checkpoints = [
+        f for f in checkpoint_dir.iterdir()
+        if f.suffix == '.pth' and f.stem.startswith('ckpt-')
+    ]
+    
+    if not checkpoints:
+        return None
+    
+    # Extract step numbers and find maximum
+    def get_step(path: Path) -> int:
+        try:
+            return int(path.stem.split('-')[1])
+        except (IndexError, ValueError):
+            return -1
+    
+    latest = max(checkpoints, key=get_step)
+    return latest if get_step(latest) >= 0 else None
 
 
 if __name__ == '__main__':
-    print('Using device:', device)
-    print(f'Evaluating model {model_name}')
-    # Don't need to load pretrained word/entity/context embedding
-    # since it will be loaded from checkpoint later
-    model = Model(config).to(device)
-    from train import latest_checkpoint  # Avoid circular imports
-    checkpoint_path = latest_checkpoint(os.path.join(config.current_data_path + '/checkpoint', config.pretrained_mode, model_name))
+    device = get_device()
+    logger.info(f'Using device: {device}')
+    logger.info(f'Evaluating {config.model_type} model')
+    
+    # Load model
+    model = create_model(config).to(device)
+    
+    # Find and load checkpoint
+    checkpoint_path = find_latest_checkpoint(config.checkpoint_dir)
     if checkpoint_path is None:
-        print('No checkpoint file found!')
-        exit()
-    print(f"Load saved parameters in {checkpoint_path}")
+        logger.error('No checkpoint file found!')
+        sys.exit(1)
+    
+    logger.info(f"Loading saved parameters from {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
-    if config.pretrained_mode == 'llama':
-        dataset_evaluate_path = os.path.join(config.current_data_path + '/tmp_pkl',config.pretrained_mode, model_name + "/evaluate_dataset" + str(config.with_prompt) + ".pkl")
-    else:
-        dataset_evaluate_path = os.path.join(config.current_data_path + '/tmp_pkl',config.pretrained_mode, model_name + "/evaluate_dataset.pkl")
-        
-    if os.path.exists(dataset_evaluate_path):
-        evaluate_dataset = load_news_dataset(dataset_evaluate_path)
-        auc, mrr, ndcg5, ndcg10 = evaluate(model, path.join(config.original_data_path, 'val'),
-                                    config.num_workers, news_dataset_built=evaluate_dataset)
-    else:
-        auc, mrr, ndcg5, ndcg10 = evaluate(model, path.join(config.original_data_path, 'val'),
-                                        config.num_workers)
+    
+    # Evaluate on val set
+    params = EvaluationParams(
+        directory=config.val_data_path,
+        num_workers=config.num_workers
+    )
+    auc, mrr, ndcg5, ndcg10 = evaluate(model, params)
+    
     print(
         f'AUC: {auc:.4f}\nMRR: {mrr:.4f}\nnDCG@5: {ndcg5:.4f}\nnDCG@10: {ndcg10:.4f}'
     )

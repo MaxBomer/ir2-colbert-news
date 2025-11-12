@@ -22,3 +22,5 @@ source activate newsrec
 pip uninstall -y torch torchvision torchaudio
 pip install --index-url https://download.pytorch.org/whl/cu124 \
   torch==2.6.0 torchvision torchaudio
+
+pip install -U sentence-transformers

@@ -1,238 +1,335 @@
-import os
+"""Configuration for NRMSbert model with BERT tiny."""
 import argparse
-
-model_name = os.environ['MODEL_NAME'] if 'MODEL_NAME' in os.environ else 'NRMSbert'
-
-# Currently included model
-assert model_name in [
-    'NRMS', 'NAML', 'LSTUR', 'DKN', 'HiFiArk', 'TANR', 'Exp1', 'NAMLlinear', 'NRMSlinear', 'LSTURlinear', 'NRMSbert', 'NAMLbert', 'LSTURbert'
-]
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, List, Optional
 
 
-
-# Set up argument parser
-parser = argparse.ArgumentParser(description="Set configuration for the model")
-parser.add_argument('--num_categories', type=int, default=1 + 274,
-                    help='`num_categories` in `src/config.py` into 1 + {len(category2int)}')
-parser.add_argument('--num_words', type=int, default=1 + 70972,
-                    help='`num_words` in `src/config.py` into 1 + {len(word2int)}')
-parser.add_argument('--num_entities', type=int, default=1 + 12957,
-                    help='`num_entities` in `src/config.py` into 1 + {len(entity2int)}')
-parser.add_argument('--measure_way', type=str, default='item_rank',
-                    help='`measure_way`, could be softmax, rank, and inverse_rank')
-parser.add_argument('--exclude_interacted_item', type=int, default=0,
-                    help='whether analysis item in user history')
-parser.add_argument('--using_UNK', type=int, default=0,
-                    help='whether retrain the whole model.')
-parser.add_argument('--api_mode', type=str, default='llama3_attack_dpo_lora_1',
-                    help='the specific name of api mode -> e.g., gpt-3.5-turbo, gpt-4 or llama3_attack_dpo_lora_1')
-parser.add_argument('--attack_mode', type=str, default='llm',
-                    help='llm or Copycat, etc. ')
-parser.add_argument('--current_data_path', type=str, default='baseline',
-                    help='llm or Copycat, etc. ')
-parser.add_argument('--attack_folder', type=str, default='YOUR_FILE/data/attack',
-                    help='llm or Copycat, etc. ')
-parser.add_argument('--gpt4_attack_text_path', type=str, default="/data/YOUR_FILE/news_data/data/gpt_data/test/data_at_interaction_598.json",
-                    help='llm or Copycat, etc. ')
-parser.add_argument('--attack_folder_mode', type=str, default="test",
-                    help='train or test, specific to attack_train or attack_test')
-parser.add_argument('--topN', type=int, default=10,
-                    help='Evaluate top N Rec Items')
-parser.add_argument('--pretrained_mode', type=str, default='bert',
-                    help='text encoder for news recommender, could be (glove, bert, or llama)')
-parser.add_argument('--original_data_path', type=str, default='baseline/data_downsampled_20k',
-                    help='model train data path')
-parser.add_argument('--word_embedding_dim', type=int, default=768,
-                    help='golve - 300, bert - 768, llama - 4096')
-parser.add_argument('--maintain_word_embedding_dim', type=int, default=300,
-                    help='golve - 300, bert - 768, llama - 4096')
-parser.add_argument('--learning_rate', type=float, default=0.0001,
-                    help='learning rate')
-parser.add_argument('--dropout_probability', type=float, default=0.2,
-                    help='dropout_probability')
-parser.add_argument('--num_attention_heads', type=int, default=16,
-                    help='num_attention_heads')
-parser.add_argument('--with_prompt', type=int, default=1,
-                    help='For LLaMa, with prompt = 1, or 0')
-parser.add_argument('--negative_sampling_ratio', type=int, default=2,
-                    help='negative sample ratio')
-parser.add_argument('--finetune_layers', type=int, default=1,
-                    help='maximum 12 layers, But I clearly could not afford it.')
-parser.add_argument('--batch_size', type=int, default=64,
-                    help='batch size')
-parser.add_argument('--pretrained_model_name', type=str, default='prajjwal1/bert-tiny',
-                    help='pretrained model name')
-args = parser.parse_args()
-
-
-class BaseConfig():
-    """
-    General configurations appiled to all models
-    """
-    finetune_layers = args.finetune_layers
-    pretrained_model_name = args.pretrained_model_name
-    with_prompt = args.with_prompt
-    maintain_word_embedding_dim = args.maintain_word_embedding_dim
-    topN = args.topN
-    current_data_path = args.current_data_path
-    measure_way = args.measure_way
-    exclude_interacted_item = args.exclude_interacted_item
-    analysis_news_popular = 1
-    gpt4_attack_text_path = args.gpt4_attack_text_path
-    original_data_path = args.original_data_path
-    pretrained_mode = args.pretrained_mode
-    home_folder = 'baseline/data_downsampled_20k/news_data'
-    seed = 2024
-    poisoning_ratio = 0.01
-    attack_folder = args.attack_folder
-    attack_folder_mode = args.attack_folder_mode
-    api_mode = args.api_mode
-    using_UNK = args.using_UNK   # if Ture, then the NRS don't need to retraining; else, the NRS couldn't process OOV, and would be better to retraining the NRS and formulate a new Vocabulary list.
-    attack_mode = 'llm'
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="Configuration for NRMSbert model")
     
-    num_epochs = 100
-    num_batches_show_loss = 100  # Number of batchs to show loss
-    # Number of batchs to check metrics on validation dataset
-    num_batches_validate = 1000
-    batch_size = args.batch_size
-    learning_rate = args.learning_rate
-    num_workers = 4  # Number of workers for data loading
-    num_clicked_news_a_user = 50  # Number of sampled click history for each user
-    num_words_title = 20
-    num_words_abstract = 50
-    word_freq_threshold = 1
-    entity_freq_threshold = 2
-    entity_confidence_threshold = 0.5
-    negative_sampling_ratio = args.negative_sampling_ratio  # K
-    dropout_probability = args.dropout_probability
-    # Modify the following by the output of `src/dataprocess.py`
-    num_words = args.num_words
-    num_categories = args.num_categories
-    num_entities = args.num_entities
-    num_users = 1 + 50000
-    word_embedding_dim = args.word_embedding_dim
-    linear_dim = 300
-    category_embedding_dim = 100
-    # Modify the following only if you use another dataset
-    entity_embedding_dim = 100
-    # For additive attention
-    query_vector_dim = 200
+    # Data paths (defaults assume running from baseline/ directory)
+    parser.add_argument(
+        '--current_data_path',
+        type=str,
+        default='baseline/data_downsampled_20k',
+        help='Path to processed data and checkpoints (default: ../data)'
+    )
+    parser.add_argument(
+        '--original_data_path',
+        type=str,
+        default='baseline/data_downsampled_20k/original',
+        help='Path to original data directory (default: ../data/original)'
+    )
+    
+    # Model parameters
+    parser.add_argument(
+        '--model_type',
+        type=str,
+        default='NRMSbert',
+        choices=['NRMSbert', 'ColBERT'],
+        help='Model type: NRMSbert or ColBERT'
+    )
+    parser.add_argument(
+        '--pretrained_model_name',
+        type=str,
+        default='prajjwal1/bert-tiny',
+        help='Pretrained model name or path (BERT for NRMSbert, any transformer for ColBERT)'
+    )
+    parser.add_argument(
+        '--colbert_model_name',
+        type=str,
+        default=None,
+        help='ColBERT model name (if different from pretrained_model_name)'
+    )
+    parser.add_argument(
+        '--colbert_embedding_dim',
+        type=int,
+        default=None,
+        help='ColBERT embedding dimension (auto-detected if not specified)'
+    )
+    parser.add_argument(
+        '--colbert_max_query_tokens',
+        type=int,
+        default=32,
+        help='Maximum number of tokens for query encoding (default: 32)'
+    )
+    parser.add_argument(
+        '--colbert_max_doc_tokens',
+        type=int,
+        default=128,
+        help='Maximum number of tokens for document encoding (default: 128)'
+    )
+    parser.add_argument(
+        '--colbert_enable_caching',
+        action='store_true',
+        help='Enable caching of news embeddings (default: False)'
+    )
+    parser.add_argument(
+        '--colbert_cache_size',
+        type=int,
+        default=10000,
+        help='Maximum number of cached embeddings (default: 10000)'
+    )
+    parser.add_argument(
+        '--bert_version',
+        type=str,
+        default='tiny',
+        help='BERT version identifier (tiny, mini, medium, large) - used for data paths'
+    )
+    parser.add_argument(
+        '--word_embedding_dim',
+        type=int,
+        default=128,
+        help='Word embedding dimension (128 for BERT tiny, 768 for BERT base)'
+    )
+    parser.add_argument(
+        '--num_attention_heads',
+        type=int,
+        default=2,
+        help='Number of attention heads (must divide word_embedding_dim)'
+    )
+    parser.add_argument(
+        '--finetune_layers',
+        type=int,
+        default=2,
+        help='Number of BERT layers to fine-tune'
+    )
+    
+    # Training parameters
+    parser.add_argument(
+        '--batch_size',
+        type=int,
+        default=32,
+        help='Batch size'
+    )
+    parser.add_argument(
+        '--learning_rate',
+        type=float,
+        default=0.0001,
+        help='Learning rate'
+    )
+    parser.add_argument(
+        '--dropout_probability',
+        type=float,
+        default=0.2,
+        help='Dropout probability'
+    )
+    parser.add_argument(
+        '--negative_sampling_ratio',
+        type=int,
+        default=2,
+        help='Negative sampling ratio (K)'
+    )
+    
+    # Test/quick run parameters
+    parser.add_argument(
+        '--test_run',
+        action='store_true',
+        help='Quick test run: train for 10 batches, validate on 100 samples'
+    )
+    parser.add_argument(
+        '--max_batches',
+        type=int,
+        default=None,
+        help='Maximum number of batches to train (overrides num_epochs if set)'
+    )
+    parser.add_argument(
+        '--max_validation_samples',
+        type=int,
+        default=200000,
+        help='Maximum number of validation samples to evaluate (default: 200000)'
+    )
+    
+    # Data preprocessing parameters (updated after preprocessing)
+    parser.add_argument(
+        '--num_categories',
+        type=int,
+        default=275,
+        help='Number of categories (1 + len(category2int))'
+    )
+    parser.add_argument(
+        '--num_words',
+        type=int,
+        default=70973,
+        help='Number of words (1 + len(word2int))'
+    )
+    parser.add_argument(
+        '--num_entities',
+        type=int,
+        default=12958,
+        help='Number of entities (1 + len(entity2int))'
+    )
+    parser.add_argument(
+        '--num_users',
+        type=int,
+        default=20001,
+        help='Number of users (1 + len(user2int))'
+    )
+    
+    return parser.parse_args()
 
 
-class NRMSConfig(BaseConfig):
-    dataset_attributes = {"news": ['title'], "record": []}
-    # For multi-head self-attention
-    num_attention_heads = args.num_attention_heads
-
-class NRMSlinearConfig(BaseConfig):
-    dataset_attributes = {"news": ['title'], "record": []}
-    # For multi-head self-attention
-    num_attention_heads = args.num_attention_heads
-
-class NRMSbertConfig(BaseConfig):
-    dataset_attributes = {"news": ['title'], "record": []}
-    # For multi-head self-attention
-    num_attention_heads = args.num_attention_heads
-
-class NAMLConfig(BaseConfig):
-    dataset_attributes = {
-        "news": ['category', 'subcategory', 'title', 'abstract'],
-        "record": []
-    }
-    # For CNN
-    num_filters = 300
-    window_size = 3
-
-class NAMLlinearConfig(BaseConfig):
-    dataset_attributes = {
-        "news": ['category', 'subcategory', 'title', 'abstract'],
-        "record": []
-    }
-    # For CNN
-    num_filters = 300
-    window_size = 3
-
-class NAMLbertConfig(BaseConfig):
-    dataset_attributes = {
-        "news": ['category', 'subcategory', 'title', 'abstract'],
-        "record": []
-    }
-    # For CNN
-    num_filters = 300
-    window_size = 3
-
-class LSTURConfig(BaseConfig):
-    dataset_attributes = {
-        "news": ['category', 'subcategory', 'title'],
-        "record": ['user', 'clicked_news_length']
-    }
-    # For CNN
-    num_filters = 300
-    window_size = 3
-    long_short_term_method = 'ini'
-    # See paper for more detail
-    assert long_short_term_method in ['ini', 'con']
-    masking_probability = 0.5
-
-class LSTURlinearConfig(BaseConfig):
-    dataset_attributes = {
-        "news": ['category', 'subcategory', 'title'],
-        "record": ['user', 'clicked_news_length']
-    }
-    # For CNN
-    num_filters = 300
-    window_size = 3
-    long_short_term_method = 'ini'
-    # See paper for more detail
-    assert long_short_term_method in ['ini', 'con']
-    masking_probability = 0.5
-
-class LSTURbertConfig(BaseConfig):
-    dataset_attributes = {
-        "news": ['category', 'subcategory', 'title'],
-        "record": ['user', 'clicked_news_length']
-    }
-    # For CNN
-    num_filters = 300
-    window_size = 3
-    long_short_term_method = 'ini'
-    # See paper for more detail
-    assert long_short_term_method in ['ini', 'con']
-    masking_probability = 0.5
-
-
-class DKNConfig(BaseConfig):
-    dataset_attributes = {"news": ['title', 'title_entities'], "record": []}
-    # For CNN
-    num_filters = 50
-    window_sizes = [2, 3, 4]
-    # TODO: currently context is not available
-    use_context = False
+@dataclass
+class NRMSbertConfig:
+    """Configuration for news recommendation models (NRMSbert, ColBERT, etc.)."""
+    
+    # Data paths (no defaults - must come first)
+    current_data_path: Path
+    original_data_path: Path
+    
+    # Model architecture (no defaults - must come first)
+    model_type: str  # 'NRMSbert' or 'ColBERT'
+    pretrained_model_name: str
+    bert_version: str  # Used for data path organization
+    word_embedding_dim: int
+    num_attention_heads: int
+    finetune_layers: int
+    
+    # Training hyperparameters (no defaults - must come first)
+    batch_size: int
+    learning_rate: float
+    dropout_probability: float
+    negative_sampling_ratio: int
+    
+    # Test/quick run parameters
+    test_run: bool
+    max_batches: Optional[int]
+    max_validation_samples: int
+    
+    # Vocabulary sizes (no defaults - must come first)
+    num_categories: int
+    num_words: int
+    num_entities: int
+    num_users: int
+    
+    # Fields with defaults (must come after fields without defaults)
+    # ColBERT-specific parameters (optional)
+    colbert_model_name: Optional[str] = None
+    colbert_embedding_dim: Optional[int] = None
+    colbert_max_query_tokens: int = 32
+    colbert_max_doc_tokens: int = 128
+    colbert_enable_caching: bool = False
+    colbert_cache_size: int = 10000
+    query_vector_dim: int = 200
+    num_epochs: int = 100
+    num_batches_show_loss: int = 100
+    num_batches_validate: int = 1000
+    num_workers: int = 4
+    num_clicked_news_a_user: int = 50
+    num_words_title: int = 20
+    num_words_abstract: int = 50
+    dataset_attributes: Optional[Dict[str, List[str]]] = None
+    seed: int = 2024
+    
+    def __post_init__(self) -> None:
+        """Initialize dataset_attributes after object creation."""
+        if self.dataset_attributes is None:
+            self.dataset_attributes = {"news": ["title"], "record": []}
+        
+        # Convert string paths to Path objects
+        if isinstance(self.current_data_path, str):
+            self.current_data_path = Path(self.current_data_path)
+        if isinstance(self.original_data_path, str):
+            self.original_data_path = Path(self.original_data_path)
+    
+    @property
+    def checkpoint_dir(self) -> Path:
+        """Get checkpoint directory path."""
+        return self.current_data_path / 'checkpoint' / 'bert' / self.bert_version / self.model_type
+    
+    @property
+    def train_data_path(self) -> Path:
+        """Get training data path (processed data organized by bert_version)."""
+        return self.current_data_path / self.bert_version / 'train'
+    
+    @property
+    def val_data_path(self) -> Path:
+        """Get validation data path (processed data organized by bert_version)."""
+        return self.current_data_path / self.bert_version / 'val'
+    
+    @property
+    def test_data_path(self) -> Path:
+        """Get test data path (processed data organized by bert_version)."""
+        return self.current_data_path / self.bert_version / 'test'
 
 
-class HiFiArkConfig(BaseConfig):
-    dataset_attributes = {"news": ['title'], "record": []}
-    # For CNN
-    num_filters = 300
-    window_size = 3
-    num_pooling_heads = 5
-    regularizer_loss_weight = 0.1
+def load_config_values_from_json(current_data_path: Path, bert_version: str) -> Dict[str, int]:
+    """Load config values from JSON file if it exists.
+    
+    Args:
+        current_data_path: Path to data directory
+        bert_version: BERT version (e.g., 'tiny')
+        
+    Returns:
+        Dictionary with config values, or empty dict if file doesn't exist
+    """
+    config_json_path = Path(current_data_path) / bert_version / 'config_values.json'
+    if config_json_path.exists():
+        try:
+            with open(config_json_path, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            # Silently fail - will use defaults
+            return {}
+    return {}
 
 
-class TANRConfig(BaseConfig):
-    dataset_attributes = {"news": ['category', 'title'], "record": []}
-    # For CNN
-    num_filters = 300
-    window_size = 3
-    topic_classification_loss_weight = 0.1
+def create_config() -> NRMSbertConfig:
+    """Create configuration from command line arguments.
+    
+    Automatically loads config values from JSON file if available.
+    """
+    args = parse_args()
+    
+    # Load config values from JSON file if it exists
+    current_data_path = Path(args.current_data_path)
+    config_values = load_config_values_from_json(current_data_path, args.bert_version)
+    
+    # Use JSON values if available, otherwise use command line args or defaults
+    num_categories = config_values.get('num_categories', args.num_categories)
+    num_words = config_values.get('num_words', args.num_words)
+    num_entities = config_values.get('num_entities', args.num_entities)
+    num_users = config_values.get('num_users', args.num_users)
+
+    # Log if we loaded from JSON
+    if config_values:
+        config_json_path = current_data_path / args.bert_version / 'config_values.json'
+        print(f"Loaded config values from {config_json_path}")
+    
+    return NRMSbertConfig(
+        current_data_path=args.current_data_path,
+        original_data_path=args.original_data_path,
+        pretrained_model_name=args.pretrained_model_name,
+        model_type=args.model_type,
+        bert_version=args.bert_version,
+        word_embedding_dim=args.word_embedding_dim,
+        num_attention_heads=args.num_attention_heads,
+        finetune_layers=args.finetune_layers,
+        colbert_model_name=args.colbert_model_name,
+        colbert_embedding_dim=args.colbert_embedding_dim,
+        colbert_max_query_tokens=args.colbert_max_query_tokens,
+        colbert_max_doc_tokens=args.colbert_max_doc_tokens,
+        colbert_enable_caching=args.colbert_enable_caching,
+        colbert_cache_size=args.colbert_cache_size,
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate,
+        dropout_probability=args.dropout_probability,
+        negative_sampling_ratio=args.negative_sampling_ratio,
+        test_run=args.test_run,
+        max_batches=args.max_batches,
+        max_validation_samples=args.max_validation_samples if not args.test_run else 100,
+        num_categories=num_categories,
+        num_words=num_words,
+        num_entities=num_entities,
+        num_users=num_users,
+    )
 
 
-class Exp1Config(BaseConfig):
-    dataset_attributes = {
-        # TODO ['category', 'subcategory', 'title', 'abstract'],
-        "news": ['category', 'subcategory', 'title'],
-        "record": []
-    }
-    # For multi-head self-attention
-    num_attention_heads = 12
-    ensemble_factor = 1  # Not use ensemble since it's too expensive
+# Create config instance for backward compatibility
+config = create_config()
+
+# Export config class for type hints
+__all__ = ['config', 'NRMSbertConfig', 'create_config']

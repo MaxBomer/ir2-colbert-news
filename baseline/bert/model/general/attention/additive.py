@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from typing import Optional, List
+
 
 class AdditiveAttention(torch.nn.Module):
     """
@@ -9,11 +11,11 @@ class AdditiveAttention(torch.nn.Module):
     Originally for NAML.
     """
     def __init__(self,
-                 query_vector_dim,
-                 candidate_vector_dim,
+                 query_vector_dim: int,
+                 candidate_vector_dim: int,
                  writer=None,
-                 tag=None,
-                 names=None):
+                 tag: Optional[str] = None,
+                 names: Optional[List[str]] = None) -> None:
         super(AdditiveAttention, self).__init__()
         self.linear = nn.Linear(candidate_vector_dim, query_vector_dim)
         self.attention_query_vector = nn.Parameter(
@@ -24,7 +26,7 @@ class AdditiveAttention(torch.nn.Module):
         self.names = names
         self.local_step = 1
 
-    def forward(self, candidate_vector):
+    def forward(self, candidate_vector: torch.Tensor) -> torch.Tensor:
         """
         Args:
             candidate_vector: batch_size, candidate_size, candidate_vector_dim
