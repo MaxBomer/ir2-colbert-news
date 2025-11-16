@@ -1,7 +1,9 @@
 """Evaluation script for NRMSbert model."""
 import ast
 import logging
+import os
 import sys
+import warnings
 from dataclasses import dataclass
 from multiprocessing import Pool
 from pathlib import Path
@@ -14,6 +16,12 @@ from ast import literal_eval
 from sklearn.metrics import roc_auc_score
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
+
+try:
+    import wandb
+    HAS_WANDB = True
+except ImportError:
+    HAS_WANDB = False
 
 from config import config
 from model.base import BaseNewsRecommendationModel
@@ -475,12 +483,25 @@ def evaluate(model: BaseNewsRecommendationModel, params: EvaluationParams) -> Tu
         results = pool.map(calculate_single_user_metric, tasks)
     
     aucs, mrrs, ndcg5s, ndcg10s = np.array(results).T
-    return (
-        float(np.nanmean(aucs)),
-        float(np.nanmean(mrrs)),
-        float(np.nanmean(ndcg5s)),
-        float(np.nanmean(ndcg10s))
-    )
+    auc_mean = float(np.nanmean(aucs))
+    mrr_mean = float(np.nanmean(mrrs))
+    ndcg5_mean = float(np.nanmean(ndcg5s))
+    ndcg10_mean = float(np.nanmean(ndcg10s))
+    
+    # Log final evaluation metrics to wandb
+    if HAS_WANDB and os.environ.get('WANDB_API_KEY'):
+        try:
+            wandb.log({
+                'final_eval/auc': auc_mean,
+                'final_eval/mrr': mrr_mean,
+                'final_eval/ndcg@5': ndcg5_mean,
+                'final_eval/ndcg@10': ndcg10_mean,
+                'final_eval/num_samples': len(tasks),
+            })
+        except Exception as e:
+            logger.warning(f"Failed to log metrics to wandb: {e}")
+    
+    return (auc_mean, mrr_mean, ndcg5_mean, ndcg10_mean)
 
 
 def find_latest_checkpoint(checkpoint_dir: Path) -> Optional[Path]:
