@@ -91,4 +91,15 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
-job_scripts/out
+job_scripts/out# Ignore job outputs
+job_scripts/out/
+
+# Ignore datasets
+baseline/data_downsampled_20k/
+baseline/data/
+
+# Ignore training outputs
+baseline/bert/runs/
+baseline/checkpoint/
+runs/
+wandb/

@@ -28,3 +28,4 @@ dependencies:
       - evaluate
       - astor
       - python-dotenv
+      #- sentence-transformers>=3.0.0 
