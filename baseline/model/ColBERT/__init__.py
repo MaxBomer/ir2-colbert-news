@@ -269,8 +269,12 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
         )  # [batch_size * (1+K), num_doc_tokens, embedding_dim]
         
         # Reshape: [batch_size, 1+K, num_doc_tokens, embedding_dim]
-        candidate_token_embeddings = candidate_token_embeddings.view(
-            batch_size, num_candidates, -1, self.embedding_dim
+        candidate_token_embeddings = (
+            candidate_token_embeddings.view(
+                num_candidates, batch_size, -1, self.embedding_dim
+            )
+            .transpose(0, 1)
+            .contiguous()
         )
         
         # Encode clicked news as queries (keep token-level embeddings)
@@ -287,8 +291,12 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
         
         num_clicked = len(clicked_news)
         # Reshape: [batch_size, num_clicked, num_query_tokens, embedding_dim]
-        clicked_token_embeddings = clicked_token_embeddings.view(
-            batch_size, num_clicked, -1, self.embedding_dim
+        clicked_token_embeddings = (
+            clicked_token_embeddings.view(
+                num_clicked, batch_size, -1, self.embedding_dim
+            )
+            .transpose(0, 1)
+            .contiguous()
         )
         
         # Apply mask to clicked news
