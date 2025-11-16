@@ -22,7 +22,6 @@ dependencies:
       - transformers
       - datasets
       - wandb
-      - tensorboard
       - sentencepiece
       - accelerate
       - evaluate

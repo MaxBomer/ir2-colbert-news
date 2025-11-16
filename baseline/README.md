@@ -260,7 +260,7 @@ baseline/
 - **Early Stopping**: Patience of 5 validation checks
 - **Validation**: Every 1000 batches
 - **Checkpoints**: Saved in `{current_data_path}/checkpoint/bert/{bert_version}/NRMSbert/`
-- **TensorBoard**: Logs in `./runs/NRMSbert/{timestamp}/`
+- **wandb**: Metrics logged to wandb (requires WANDB_API_KEY environment variable)
 
 ## Troubleshooting
 

@@ -16,7 +16,6 @@ dependencies = [
     "nltk>=3.7",
     "tqdm>=4.64.0",
     "scikit-learn>=1.0.0",
-    "tensorboard>=2.9.0",
     "sentence-transformers>=2.2.0", # Required for pylate/ColBERT
     "datasets>=2.0.0", # Required for pylate/ColBERT
     "wandb>=0.23.0",

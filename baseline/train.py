@@ -13,7 +13,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 try:
@@ -70,7 +69,6 @@ class TrainingContext:
     dataloader: DataLoader
     criterion: nn.Module
     optimizer: torch.optim.Optimizer
-    writer: SummaryWriter
     start_time: float
     early_stopping: 'EarlyStopping'
     use_wandb: bool = False
@@ -281,12 +279,6 @@ def setup_training_context(cfg: NRMSbertConfig) -> TrainingContext:
     # Check wandb setup
     use_wandb = check_wandb_setup()
     
-    # Setup logging
-    log_dir = Path(f"./runs/{cfg.model_type}") / datetime.datetime.now().replace(microsecond=0).isoformat()
-    if 'REMARK' in os.environ:
-        log_dir = Path(str(log_dir) + '-' + os.environ['REMARK'])
-    writer = SummaryWriter(log_dir=str(log_dir))
-    
     # Initialize wandb if available
     if use_wandb:
         wandb.init(
@@ -356,7 +348,6 @@ def setup_training_context(cfg: NRMSbertConfig) -> TrainingContext:
         dataloader=dataloader,
         criterion=criterion,
         optimizer=optimizer,
-        writer=writer,
         start_time=start_time,
         early_stopping=early_stopping,
         use_wandb=use_wandb
@@ -444,8 +435,6 @@ def log_training_progress(ctx: TrainingContext, batch_idx: int, step: int, loss:
         loss_history: History of loss values
     """
     if batch_idx % 10 == 0:
-        ctx.writer.add_scalar('Train/Loss', loss, step)
-        
         # Log to wandb
         if ctx.use_wandb:
             wandb.log({'train/loss_step': loss, 'step': step})
@@ -473,10 +462,12 @@ def log_training_progress(ctx: TrainingContext, batch_idx: int, step: int, loss:
         # Log comprehensive metrics to wandb
         if ctx.use_wandb:
             wandb.log({
+                'train/loss': loss,
                 'train/avg_loss': avg_loss,
                 'train/recent_avg_loss': recent_avg_loss,
                 'train/loss_trend': loss_trend,  # slope: negative = improving, positive = plateau
                 'train/batch': batch_idx,
+                'step': step,
             })
 
 
@@ -493,11 +484,6 @@ def run_validation(ctx: TrainingContext, batch_idx: int, step: int) -> Tuple[boo
     """
     val_auc, val_mrr, val_ndcg5, val_ndcg10 = validate(ctx)
     
-    ctx.writer.add_scalar('Validation/AUC', val_auc, step)
-    ctx.writer.add_scalar('Validation/MRR', val_mrr, step)
-    ctx.writer.add_scalar('Validation/nDCG@5', val_ndcg5, step)
-    ctx.writer.add_scalar('Validation/nDCG@10', val_ndcg10, step)
-    
     # Log to wandb
     if ctx.use_wandb:
         wandb.log({
@@ -505,6 +491,7 @@ def run_validation(ctx: TrainingContext, batch_idx: int, step: int) -> Tuple[boo
             'val/mrr': val_mrr,
             'val/ndcg@5': val_ndcg5,
             'val/ndcg@10': val_ndcg10,
+            'val/batch': batch_idx,
             'step': step,
         })
     
@@ -554,6 +541,17 @@ def train() -> None:
     
     ctx.model.eval()
     final_auc, final_mrr, final_ndcg5, final_ndcg10 = validate(ctx)
+    
+    # Log final validation metrics to wandb
+    if ctx.use_wandb:
+        wandb.log({
+            'final/auc': final_auc,
+            'final/mrr': final_mrr,
+            'final/ndcg@5': final_ndcg5,
+            'final/ndcg@10': final_ndcg10,
+            'final/batch': final_batch_idx,
+            'final/step': best_step,
+        })
     
     message = (
         f"\n\nTime {time_since(ctx.start_time)}, batches {final_batch_idx}, "
