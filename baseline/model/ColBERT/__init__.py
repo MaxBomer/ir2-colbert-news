@@ -77,7 +77,7 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
     
     def __init__(self, config: NRMSbertConfig) -> None:
         """Initialize ColBERT adapter.
-        
+
         Args:
             config: Configuration object
         """
@@ -85,12 +85,16 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
         self.config = config
         
         # Initialize ColBERT model
-        colbert_model_name = config.colbert_model_name if config.colbert_model_name is not None else config.pretrained_model_name
+        colbert_model_name = (
+            config.colbert_model_name
+            if config.colbert_model_name is not None
+            else config.pretrained_model_name
+        )
         embedding_size = getattr(config, 'colbert_embedding_dim', None)
         try:
             self.colbert_model = colbert_models.ColBERT(
                 model_name_or_path=colbert_model_name,
-                device=None,  # Will be set when moved to device
+                device=None,
                 embedding_size=embedding_size,
                 query_length=config.colbert_max_query_tokens,
                 document_length=config.colbert_max_doc_tokens,
@@ -106,29 +110,32 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
                     f"Failed to initialize ColBERT model with '{colbert_model_name}'. "
                     f"Original error: {e}. Secondary error: {e2}"
                 ) from e2
-        
-        # Get embedding dimension
-        if embedding_size is not None:
-            self.embedding_dim = embedding_size
+
+        # Get embedding dimension from the ColBERT sentence embeddings
+        if hasattr(self.colbert_model, "get_sentence_embedding_dimension"):
+            # Works with Pylate
+            self.embedding_dim = self.colbert_model.get_sentence_embedding_dimension()
         else:
-            self.embedding_dim = config.colbert_embedding_dim if config.colbert_embedding_dim is not None else 128
-        
-        # Initialize tokenizer for converting token IDs back to text
+            # Default fallback
+            self.embedding_dim = getattr(config, "colbert_embedding_dim", 128)
+
+        # Tokenizer for turning IDs into text
         self.tokenizer = AutoTokenizer.from_pretrained(config.pretrained_model_name)
-        
-        # Token limits
+
+        # Sets token limit
         self.max_query_tokens = config.colbert_max_query_tokens
         self.max_doc_tokens = config.colbert_max_doc_tokens
-        
-        # Embedding cache (LRU cache)
+
+        # Embedding cache
         self.enable_caching = config.colbert_enable_caching
         self.cache_size = config.colbert_cache_size
         self._embedding_cache: OrderedDict[str, torch.Tensor] = OrderedDict()
-        
-        # User encoder - we'll aggregate token embeddings before passing to it
-        # For now, we'll use mean pooling of token embeddings for user encoding
-        # This could be improved with attention over tokens
+
+        # Define user encoder
         self.user_encoder = UserEncoder(config, embedding_dim=self.embedding_dim)
+
+        # Add trainable scoring layer for MaxSim output
+        self.scoring_layer = nn.Linear(1, 1)
     
     def _prune_tokens(self, input_ids: torch.Tensor, max_tokens: int) -> torch.Tensor:
         """Truncate tokens to max_tokens length (ColBERT handles special tokens internally).
@@ -186,114 +193,48 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
         """Generate cache key for text."""
         return f"{'query' if is_query else 'doc'}:{text}"
     
-    def _encode_with_colbert(
-        self,
-        texts: List[str],
-        is_query: bool,
-        device: torch.device,
-    ) -> torch.Tensor:
-        """Encode texts with ColBERT, returning token-level embeddings.
-        
-        Args:
-            texts: List of text strings
-            is_query: Whether encoding as queries (True) or documents (False)
-            device: Device to use
-            
-        Returns:
-            Token embeddings: [batch_size, num_tokens, embedding_dim]
+    def _encode_with_colbert(self, texts, is_query, device):
         """
-        # Check cache if enabled
-        if self.enable_caching:
-            cached_embeddings = []
-            texts_to_encode = []
-            cache_indices = []
-            
-            for i, text in enumerate(texts):
-                cache_key = self._get_cache_key(text, is_query)
-                if cache_key in self._embedding_cache:
-                    cached_embeddings.append((i, self._embedding_cache[cache_key]))
-                    # Move to end (LRU)
-                    self._embedding_cache.move_to_end(cache_key)
-                else:
-                    texts_to_encode.append((i, text))
-                    cache_indices.append(i)
-            
-            # Encode uncached texts
-            if texts_to_encode:
-                texts_list = [text for _, text in texts_to_encode]
-                embeddings_list = self.colbert_model.encode(
-                    sentences=texts_list,
-                    batch_size=len(texts_list),
-                    convert_to_tensor=True,
-                    convert_to_numpy=False,
-                    is_query=is_query,
-                    device=str(device),
-                    show_progress_bar=False,
-                )
-                
-                # Process embeddings (ColBERT returns list of [num_tokens, embedding_dim])
-                if isinstance(embeddings_list, list):
-                    for (orig_idx, _), emb in zip(texts_to_encode, embeddings_list):
-                        if isinstance(emb, torch.Tensor):
-                            emb_tensor = emb.to(device)
-                        else:
-                            emb_tensor = torch.from_numpy(emb).to(device)
-                        
-                        # Cache it
-                        cache_key = self._get_cache_key(texts_list[texts_to_encode.index((orig_idx, _))], is_query)
-                        self._embedding_cache[cache_key] = emb_tensor.cpu()
-                        # Enforce cache size limit
-                        if len(self._embedding_cache) > self.cache_size:
-                            self._embedding_cache.popitem(last=False)
-                        
-                        cached_embeddings.append((orig_idx, emb_tensor))
-                else:
-                    # Single tensor case
-                    if embeddings_list.dim() == 2:
-                        embeddings_list = embeddings_list.unsqueeze(0)
-                    for i, (orig_idx, _) in enumerate(texts_to_encode):
-                        emb_tensor = embeddings_list[i].to(device)
-                        cache_key = self._get_cache_key(texts_list[i], is_query)
-                        self._embedding_cache[cache_key] = emb_tensor.cpu()
-                        if len(self._embedding_cache) > self.cache_size:
-                            self._embedding_cache.popitem(last=False)
-                        cached_embeddings.append((orig_idx, emb_tensor))
-            
-            # Sort by original index and stack
-            cached_embeddings.sort(key=lambda x: x[0])
-            embeddings = torch.stack([emb for _, emb in cached_embeddings], dim=0)
-        else:
-            # No caching
-            embeddings_list = self.colbert_model.encode(
-                sentences=texts,
-                batch_size=len(texts),
-                convert_to_tensor=True,
-                convert_to_numpy=False,
-                is_query=is_query,
-                device=str(device),
-                show_progress_bar=False,
+        Trainable ColBERT embedding function.
+        Compatible with ColBERT-v1, v2, and PyLaTe wrapper.
+        """
+
+        # Tokenize with ColBERT tokenizer
+        inputs = self.colbert_model.tokenizer(
+            texts,
+            padding="max_length",
+            truncation=True,
+            max_length=self.max_query_tokens if is_query else self.max_doc_tokens,
+            return_tensors="pt"
+        ).to(device)
+
+        # Now get HF encoder (.transformers_model from Pylate)
+        encoder = getattr(self.colbert_model, "transformers_model", None)
+        if encoder is None:
+            raise RuntimeError(
+                "ColBERT model has no HF encoder (.transformers_model). "
+                "Check PyLaTe version / ColBERT checkpoint."
             )
-            
-            # Process embeddings
-            if isinstance(embeddings_list, list):
-                embeddings = []
-                for emb in embeddings_list:
-                    if isinstance(emb, torch.Tensor):
-                        embeddings.append(emb.to(device))
-                    else:
-                        embeddings.append(torch.from_numpy(emb).to(device))
-                embeddings = torch.stack(embeddings, dim=0)
-            elif isinstance(embeddings_list, torch.Tensor):
-                embeddings = embeddings_list.to(device)
-                if embeddings.dim() == 2:
-                    embeddings = embeddings.unsqueeze(0)
-            else:
-                # numpy array
-                embeddings = torch.from_numpy(embeddings_list).to(device)
-                if embeddings.dim() == 2:
-                    embeddings = embeddings.unsqueeze(0)
-        
-        return embeddings  # [batch_size, num_tokens, embedding_dim]
+
+        # Forward pass through HF encoder
+        outputs = encoder(
+            input_ids=inputs["input_ids"],
+            attention_mask=inputs["attention_mask"]
+        )
+
+        # Go from hidden states to token embeddings
+        token_embeddings = outputs.last_hidden_state
+
+        # Apply ColBERT projection layer (only if it is present)
+        if hasattr(self.colbert_model, "linear"):
+            token_embeddings = self.colbert_model.linear(token_embeddings)
+
+        # Optional dimensional truncation
+        truncate_dim = getattr(self.colbert_model, "truncate_dim", None)
+        if callable(truncate_dim):
+            token_embeddings = truncate_dim(token_embeddings)
+
+        return token_embeddings
     
     def forward(
         self,
@@ -397,32 +338,69 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
             scores.append(torch.stack(batch_scores))  # [batch_size]
         
         # Stack: [batch_size, 1+K]
-        click_probability = torch.stack(scores, dim=1)
+        click_probability = torch.stack(scores, dim=1)  # [B, 1+K]
+        
+        # Pass through trainable layer so gradients flow
+        click_probability = self.scoring_layer(click_probability.unsqueeze(-1)).squeeze(-1)
         
         return click_probability
     
     def get_news_vector(self, news: Dict[str, torch.Tensor]) -> torch.Tensor:
-        """Get news vector representation (mean pooled for compatibility).
-        
-        Args:
-            news: Dictionary containing "title" tensor
-            
-        Returns:
-            News vector with shape [batch_size, embedding_dim]
+        """
+        Get news vector representation for evaluation.
+    
+        Uses mean pooling over token embeddings so dimensionality stays fixed.
         """
         device = next(self.parameters()).device
+    
+        # Convert token IDs back to text
         input_ids = news["title"][:, 0]
         input_ids = self._prune_tokens(input_ids, self.max_doc_tokens)
         texts = self._token_ids_to_text(input_ids)
-        
-        token_embeddings = self._encode_with_colbert(
-            texts,
-            is_query=False,
-            device=device,
-        )  # [batch_size, num_tokens, embedding_dim]
-        
-        # Mean pool for compatibility with existing evaluation code
-        return token_embeddings.mean(dim=1)  # [batch_size, embedding_dim]
+    
+        # Use no-grad
+        with torch.no_grad():
+            embeddings = self.colbert_model.encode(
+                sentences=texts,
+                batch_size=len(texts),
+                convert_to_tensor=True,
+                convert_to_numpy=False,
+                is_query=False,
+                device=str(device),
+                show_progress_bar=False,
+            )
+    
+        # Normalize to a list of tensors
+        if isinstance(embeddings, list):
+            tensors = []
+            for emb in embeddings:
+                if not isinstance(emb, torch.Tensor):
+                    emb = torch.from_numpy(emb)
+                emb = emb.to(device)
+    
+                # emb has shape [seq_len, dim]
+                pooled = emb.mean(dim=0) 
+                tensors.append(pooled)
+    
+            # news_vector has shape [batch, dim]
+            news_vectors = torch.stack(tensors, dim=0)
+    
+        elif isinstance(embeddings, torch.Tensor):
+            # If embeddings is [batch, seq_len, dim], we pool
+            if embeddings.dim() == 3:
+                news_vectors = embeddings.mean(dim=1)
+            else:
+                news_vectors = embeddings.unsqueeze(0)
+    
+        else:
+            # Otherwise fall back on a numpy array
+            emb = torch.from_numpy(embeddings).to(device)
+            if emb.dim() == 3:
+                news_vectors = emb.mean(dim=1)
+            else:
+                news_vectors = emb.unsqueeze(0)
+    
+        return news_vectors
     
     def get_user_vector(self, clicked_news_vector: torch.Tensor) -> torch.Tensor:
         """Get user vector representation.
