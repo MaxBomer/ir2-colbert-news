@@ -6,12 +6,11 @@ from config import NRMSbertConfig
 from model.general.attention.additive import AdditiveAttention
 from model.general.attention.multihead_self import MultiHeadSelfAttention
 
-from typing import Optional
 
 class UserEncoder(nn.Module):
     """Encoder for user representation using attention mechanisms."""
     
-    def __init__(self, config: NRMSbertConfig, embedding_dim: Optional[int] = None) -> None:
+    def __init__(self, config: NRMSbertConfig, embedding_dim: int | None = None) -> None:
         """Initialize user encoder.
         
         Args:

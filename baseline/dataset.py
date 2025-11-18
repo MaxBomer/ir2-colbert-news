@@ -1,7 +1,7 @@
 """Dataset classes for NRMSbert model."""
 import ast
 from pathlib import Path
-from typing import Dict, List, Union
+from typing import Dict, List
 
 import pandas as pd
 import torch
@@ -44,7 +44,7 @@ def _create_padding_token(num_words_title: int) -> torch.Tensor:
 class BaseDataset(Dataset):
     """Dataset for training NRMSbert model."""
     
-    def __init__(self, behaviors_path: Union[Path, str], news_path: Union[Path, str]) -> None:
+    def __init__(self, behaviors_path: Path | str, news_path: Path | str) -> None:
         """Initialize dataset.
         
         Args:
@@ -88,7 +88,7 @@ class BaseDataset(Dataset):
         """Return dataset size."""
         return len(self.behaviors_parsed)
     
-    def __getitem__(self, idx: int) -> Dict[str, Union[List, torch.Tensor]]:
+    def __getitem__(self, idx: int) -> Dict[str, List | torch.Tensor]:
         """Get a single training sample.
         
         Args:

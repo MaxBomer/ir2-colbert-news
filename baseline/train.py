@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 import time
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
@@ -12,8 +13,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+
+try:
+    import wandb
+    HAS_WANDB = True
+except ImportError:
+    HAS_WANDB = False
 
 from config import config, NRMSbertConfig
 from dataset import BaseDataset
@@ -30,6 +36,28 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def check_wandb_setup() -> bool:
+    """Check if wandb is properly configured.
+    
+    Returns:
+        True if wandb is available and API key is set, False otherwise
+    """
+    if not HAS_WANDB:
+        warnings.warn("wandb not installed. Install with: pip install wandb", UserWarning)
+        return False
+    
+    if not os.environ.get('WANDB_API_KEY'):
+        warnings.warn(
+            "WANDB_API_KEY environment variable not set. "
+            "Set it with: export WANDB_API_KEY='your-api-key' "
+            "or wandb login. Metrics will not be logged to wandb.",
+            UserWarning
+        )
+        return False
+    
+    return True
+
+
 @dataclass
 class TrainingContext:
     """Context object holding high-level training state."""
@@ -41,9 +69,9 @@ class TrainingContext:
     dataloader: DataLoader
     criterion: nn.Module
     optimizer: torch.optim.Optimizer
-    writer: SummaryWriter
     start_time: float
     early_stopping: 'EarlyStopping'
+    use_wandb: bool = False
     
     @property
     def batches_per_epoch(self) -> int:
@@ -231,7 +259,7 @@ def load_checkpoint(ctx: TrainingContext, checkpoint_path: Path) -> dict:
     Returns:
         Checkpoint dictionary
     """
-    checkpoint = torch.load(checkpoint_path, weights_only=False)
+    checkpoint = torch.load(checkpoint_path)
     ctx.model.load_state_dict(checkpoint['model_state_dict'])
     return checkpoint
 
@@ -248,11 +276,28 @@ def setup_training_context(cfg: NRMSbertConfig) -> TrainingContext:
     start_time = time.time()
     device = get_device()
     
-    # Setup logging
-    log_dir = Path(f"./runs/{cfg.model_type}") / datetime.datetime.now().replace(microsecond=0).isoformat()
-    if 'REMARK' in os.environ:
-        log_dir = Path(str(log_dir) + '-' + os.environ['REMARK'])
-    writer = SummaryWriter(log_dir=str(log_dir))
+    # Check wandb setup
+    use_wandb = check_wandb_setup()
+    
+    # Initialize wandb if available
+    if use_wandb:
+        wandb.init(
+            project="news-recommendation",
+            name=f"{cfg.model_type}-{datetime.datetime.now().isoformat()}",
+            config={
+                'model_type': cfg.model_type,
+                'learning_rate': cfg.learning_rate,
+                'batch_size': cfg.batch_size,
+                'dropout_probability': cfg.dropout_probability,
+                'negative_sampling_ratio': cfg.negative_sampling_ratio,
+                'pretrained_model_name': cfg.pretrained_model_name,
+                'colbert_model_name': cfg.colbert_model_name,
+                'colbert_embedding_dim': cfg.colbert_embedding_dim,
+                'colbert_max_query_tokens': cfg.colbert_max_query_tokens,
+                'colbert_max_doc_tokens': cfg.colbert_max_doc_tokens,
+            }
+        )
+        logger.info("wandb initialized for experiment tracking")
     
     # Setup checkpoint directory
     cfg.checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -303,9 +348,9 @@ def setup_training_context(cfg: NRMSbertConfig) -> TrainingContext:
         dataloader=dataloader,
         criterion=criterion,
         optimizer=optimizer,
-        writer=writer,
         start_time=start_time,
-        early_stopping=early_stopping
+        early_stopping=early_stopping,
+        use_wandb=use_wandb
     )
 
 
@@ -390,20 +435,40 @@ def log_training_progress(ctx: TrainingContext, batch_idx: int, step: int, loss:
         loss_history: History of loss values
     """
     if batch_idx % 10 == 0:
-        ctx.writer.add_scalar('Train/Loss', loss, step)
+        # Log to wandb
+        if ctx.use_wandb:
+            wandb.log({'train/loss_step': loss, 'step': step})
     
     if batch_idx % ctx.config.num_batches_show_loss == 0:
         avg_loss = np.mean(loss_history)
         recent_avg_loss = np.mean(loss_history[-256:]) if len(loss_history) >= 256 else avg_loss
+        
+        # Compute loss trend to detect plateaus
+        if len(loss_history) >= 100:
+            loss_trend = np.polyfit(range(len(loss_history[-100:])), loss_history[-100:], 1)[0]
+        else:
+            loss_trend = 0.0
+        
         message = (
             f"Time {time_since(ctx.start_time)}, batches {batch_idx}, "
             f"current loss {loss:.4f}, average loss: {avg_loss:.4f}, "
-            f"recent average loss: {recent_avg_loss:.4f}"
+            f"recent average loss: {recent_avg_loss:.4f}, trend: {loss_trend:.6f}"
         )
         if should_display_progress():
             tqdm.write(message)
         else:
             logger.info(message)
+        
+        # Log comprehensive metrics to wandb
+        if ctx.use_wandb:
+            wandb.log({
+                'train/loss': loss,
+                'train/avg_loss': avg_loss,
+                'train/recent_avg_loss': recent_avg_loss,
+                'train/loss_trend': loss_trend,  # slope: negative = improving, positive = plateau
+                'train/batch': batch_idx,
+                'step': step,
+            })
 
 
 def run_validation(ctx: TrainingContext, batch_idx: int, step: int) -> Tuple[bool, bool, Optional[Path]]:
@@ -419,10 +484,16 @@ def run_validation(ctx: TrainingContext, batch_idx: int, step: int) -> Tuple[boo
     """
     val_auc, val_mrr, val_ndcg5, val_ndcg10 = validate(ctx)
     
-    ctx.writer.add_scalar('Validation/AUC', val_auc, step)
-    ctx.writer.add_scalar('Validation/MRR', val_mrr, step)
-    ctx.writer.add_scalar('Validation/nDCG@5', val_ndcg5, step)
-    ctx.writer.add_scalar('Validation/nDCG@10', val_ndcg10, step)
+    # Log to wandb
+    if ctx.use_wandb:
+        wandb.log({
+            'val/auc': val_auc,
+            'val/mrr': val_mrr,
+            'val/ndcg@5': val_ndcg5,
+            'val/ndcg@10': val_ndcg10,
+            'val/batch': batch_idx,
+            'step': step,
+        })
     
     message = (
         f"\nTime {time_since(ctx.start_time)}, batches {batch_idx}, "
@@ -437,11 +508,14 @@ def run_validation(ctx: TrainingContext, batch_idx: int, step: int) -> Tuple[boo
     # Early stopping check
     early_stop, improved = ctx.early_stopping(-val_auc)
     if early_stop:
-        message = 'Early stopping triggered.'
+        message = 'Early stopping triggered due to plateau.'
         if should_display_progress():
             tqdm.write(message)
         else:
             logger.info(message)
+        # Log early stopping to wandb
+        if ctx.use_wandb:
+            wandb.log({'training/early_stopped': True})
         return True, False, None
     
     # Save best checkpoint
@@ -467,6 +541,17 @@ def train() -> None:
     
     ctx.model.eval()
     final_auc, final_mrr, final_ndcg5, final_ndcg10 = validate(ctx)
+    
+    # Log final validation metrics to wandb
+    if ctx.use_wandb:
+        wandb.log({
+            'final/auc': final_auc,
+            'final/mrr': final_mrr,
+            'final/ndcg@5': final_ndcg5,
+            'final/ndcg@10': final_ndcg10,
+            'final/batch': final_batch_idx,
+            'final/step': best_step,
+        })
     
     message = (
         f"\n\nTime {time_since(ctx.start_time)}, batches {final_batch_idx}, "

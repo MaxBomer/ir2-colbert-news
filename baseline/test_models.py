@@ -60,3 +60,4 @@ def test_model_loading():
 if __name__ == '__main__':
     success = test_model_loading()
     sys.exit(0 if success else 1)
+

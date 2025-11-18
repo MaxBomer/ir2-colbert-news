@@ -5,7 +5,6 @@ outputs/
 .env
 runs/
 wandb/
-checkpoint/
 output_models/
 output/
 
@@ -90,5 +89,3 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
-
-job_scripts/out

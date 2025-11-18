@@ -14,4 +14,4 @@ module load Anaconda3/2025.06-1
 
 source activate newsrec
 
-srun python baseline/bert/data_preprocess.py
+srun python baseline/download_and_setup_data.py

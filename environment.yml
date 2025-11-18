@@ -6,7 +6,7 @@ channels:
   - huggingface
 
 dependencies:
-  - python=3.9
+  - python=3.12
   - pytorch
   - torchvision
   - cudatoolkit=11.7   
@@ -22,9 +22,10 @@ dependencies:
       - transformers
       - datasets
       - wandb
-      - tensorboard
       - sentencepiece
       - accelerate
       - evaluate
       - astor
       - python-dotenv
+      - sentence-transformers>=2.2.0
+

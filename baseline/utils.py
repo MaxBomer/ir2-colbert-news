@@ -1,14 +1,13 @@
 """Utility functions for NRMSbert model."""
 import pickle
 import sys
-from typing import Union, Any, Optional
 from pathlib import Path
 from typing import Any
 
 import torch
 
 
-def save_news_dataset(file_path: Union[Path, str], data: Any) -> None:
+def save_news_dataset(file_path: Path | str, data: Any) -> None:
     """Save news dataset to pickle file.
     
     Args:
@@ -19,7 +18,7 @@ def save_news_dataset(file_path: Union[Path, str], data: Any) -> None:
         pickle.dump(data, f)
 
 
-def load_news_dataset(file_path: Union[Path, str]) -> Any:
+def load_news_dataset(file_path: Path | str) -> Any:
     """Load news dataset from pickle file.
     
     Args:
@@ -48,7 +47,7 @@ def get_device() -> torch.device:
         return torch.device("cpu")
 
 
-def should_pin_memory(device: Optional[torch.device] = None) -> bool:
+def should_pin_memory(device: torch.device | None = None) -> bool:
     """Determine if pin_memory should be enabled for DataLoader.
     
     pin_memory is beneficial for CUDA but not supported on MPS (Apple Silicon).
@@ -79,4 +78,3 @@ def should_display_progress() -> bool:
         True if output is a TTY, False otherwise
     """
     return sys.stdout.isatty()
-

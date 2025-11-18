@@ -176,9 +176,9 @@ def parse_news(
     tokenizer: BertTokenizer,
     num_words_title: int,
     mode: str,
-    category2int_path: Optional[Path] = None,
-    word2int_path: Optional[Path] = None,
-    entity2int_path: Optional[Path] = None,
+    category2int_path: Path | None = None,
+    word2int_path: Path | None = None,
+    entity2int_path: Path | None = None,
 ) -> Tuple[int, int, int]:
     """Parse news for training set and test set.
     
@@ -303,8 +303,8 @@ def split_train_val(
     val_split.to_csv(val_output_dir / 'behaviors.tsv', sep='\t', index=False, header=False)
     
     # Copy news file (same for both splits)
-    shutil.copy2(train_news_path, train_output_dir / 'news.tsv')
-    shutil.copy2(train_news_path, val_output_dir / 'news.tsv')
+    shutil.copy(train_news_path, train_output_dir / 'news.tsv')
+    shutil.copy(train_news_path, val_output_dir / 'news.tsv')
     
     logger.info(f"Split complete. Train: {train_output_dir}, Val: {val_output_dir}")
 
@@ -327,7 +327,7 @@ def main() -> None:
     parser.add_argument(
         '--original_data_path',
         type=str,
-        default='baseline/data_downsampled_20k/original',
+        default='./data/original',
         help='Path to original data directory'
     )
     parser.add_argument(
@@ -362,9 +362,18 @@ def main() -> None:
     
     # Find test files (prefer test over dev)
     test_dir = original_base / 'test'
+    dev_dir = original_base / 'dev'
     if test_dir.exists():
         test_files = _find_mind_files(test_dir)
         logger.info("Using test directory for test set")
+    elif dev_dir.exists():
+        test_files = _find_mind_files(dev_dir)
+        logger.info("Using dev directory as test set")
+    else:
+        raise FileNotFoundError(
+            f"Neither test nor dev directory found in {original_base}\n"
+            f"Expected: {test_dir} or {dev_dir}"
+        )
     
     # Output paths: processed data organized by bert_version
     # Processed data goes in data/{bert_version}, not data/original/{bert_version}
@@ -376,6 +385,7 @@ def main() -> None:
     # Create output directories
     train_output_dir.mkdir(parents=True, exist_ok=True)
     val_output_dir.mkdir(parents=True, exist_ok=True)
+    test_output_dir.mkdir(parents=True, exist_ok=True)
     
     # Split train into train/val if val doesn't already exist
     if val_files_exist:
@@ -384,11 +394,11 @@ def main() -> None:
         logger.info("=" * 60)
         logger.info("Val directory already exists, skipping split")
         # Copy existing files to output directories
-        shutil.copy2(train_files['behaviors'], train_output_dir / 'behaviors.tsv')
-        shutil.copy2(train_files['news'], train_output_dir / 'news.tsv')
+        shutil.copy(train_files['behaviors'], train_output_dir / 'behaviors.tsv')
+        shutil.copy(train_files['news'], train_output_dir / 'news.tsv')
         val_files = _find_mind_files(val_dir)
-        shutil.copy2(val_files['behaviors'], val_output_dir / 'behaviors.tsv')
-        shutil.copy2(val_files['news'], val_output_dir / 'news.tsv')
+        shutil.copy(val_files['behaviors'], val_output_dir / 'behaviors.tsv')
+        shutil.copy(val_files['news'], val_output_dir / 'news.tsv')
     else:
         logger.info("=" * 60)
         logger.info("Step 1: Splitting training data into train/val")
@@ -398,8 +408,8 @@ def main() -> None:
         temp_train_dir.mkdir(exist_ok=True)
         
         # Copy original train files to temp location
-        shutil.copy2(train_files['behaviors'], temp_train_dir / 'behaviors.tsv')
-        shutil.copy2(train_files['news'], temp_train_dir / 'news.tsv')
+        shutil.copy(train_files['behaviors'], temp_train_dir / 'behaviors.tsv')
+        shutil.copy(train_files['news'], temp_train_dir / 'news.tsv')
         
         split_train_val(
             temp_train_dir / 'behaviors.tsv',
@@ -459,24 +469,23 @@ def main() -> None:
     )
     
     # Process test data
-    if test_dir.exists():
-        logger.info("=" * 60)
-        logger.info("Step 4: Processing test data")
-        logger.info("=" * 60)
-        # Copy test behaviors to test output (no parsing needed, just copy structure)
-        test_output_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(test_files['behaviors'], test_output_dir / 'behaviors.tsv')
-        
-        parse_news(
-            test_files['news'],
-            test_output_dir / 'news_parsed.tsv',
-            tokenizer,
-            config.num_words_title,
-            mode='test',
-            category2int_path=train_output_dir / 'category2int.tsv',
-            word2int_path=train_output_dir / 'word2int.tsv',
-            entity2int_path=train_output_dir / 'entity2int.tsv',
-        )
+    logger.info("=" * 60)
+    logger.info("Step 4: Processing test data")
+    logger.info("=" * 60)
+    # Copy test behaviors to test output (no parsing needed, just copy structure)
+    test_output_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(test_files['behaviors'], test_output_dir / 'behaviors.tsv')
+    
+    parse_news(
+        test_files['news'],
+        test_output_dir / 'news_parsed.tsv',
+        tokenizer,
+        config.num_words_title,
+        mode='test',
+        category2int_path=train_output_dir / 'category2int.tsv',
+        word2int_path=train_output_dir / 'word2int.tsv',
+        entity2int_path=train_output_dir / 'entity2int.tsv',
+    )
     
     # Calculate final values (1 + length for 0-indexing)
     num_users_final = 1 + len(user2int)

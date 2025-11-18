@@ -14,13 +14,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--current_data_path',
         type=str,
-        default='baseline/data_downsampled_20k',
+        default='../data',
         help='Path to processed data and checkpoints (default: ../data)'
     )
     parser.add_argument(
         '--original_data_path',
         type=str,
-        default='baseline/data_downsampled_20k/original',
+        default='../data/original',
         help='Path to original data directory (default: ../data/original)'
     )
     
@@ -165,7 +165,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--num_users',
         type=int,
-        default=20001,
+        default=50001,
         help='Number of users (1 + len(user2int))'
     )
     
@@ -207,8 +207,8 @@ class NRMSbertConfig:
     
     # Fields with defaults (must come after fields without defaults)
     # ColBERT-specific parameters (optional)
-    colbert_model_name: Optional[str] = None
-    colbert_embedding_dim: Optional[int] = None
+    colbert_model_name: str | None = None
+    colbert_embedding_dim: int | None = None
     colbert_max_query_tokens: int = 32
     colbert_max_doc_tokens: int = 128
     colbert_enable_caching: bool = False
@@ -293,7 +293,7 @@ def create_config() -> NRMSbertConfig:
     num_words = config_values.get('num_words', args.num_words)
     num_entities = config_values.get('num_entities', args.num_entities)
     num_users = config_values.get('num_users', args.num_users)
-
+    
     # Log if we loaded from JSON
     if config_values:
         config_json_path = current_data_path / args.bert_version / 'config_values.json'
@@ -302,8 +302,8 @@ def create_config() -> NRMSbertConfig:
     return NRMSbertConfig(
         current_data_path=args.current_data_path,
         original_data_path=args.original_data_path,
-        pretrained_model_name=args.pretrained_model_name,
         model_type=args.model_type,
+        pretrained_model_name=args.pretrained_model_name,
         bert_version=args.bert_version,
         word_embedding_dim=args.word_embedding_dim,
         num_attention_heads=args.num_attention_heads,

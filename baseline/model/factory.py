@@ -62,3 +62,4 @@ def list_available_models() -> list[str]:
         List of model type names
     """
     return list(_MODEL_REGISTRY.keys())
+

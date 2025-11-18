@@ -117,3 +117,4 @@ if __name__ == '__main__':
         sys.exit(1)
     
     reorganize_mind_data(data_dir)
+

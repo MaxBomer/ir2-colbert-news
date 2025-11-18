@@ -1,11 +1,13 @@
 """Evaluation script for NRMSbert model."""
 import ast
 import logging
+import os
 import sys
+import warnings
 from dataclasses import dataclass
 from multiprocessing import Pool
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -14,6 +16,12 @@ from ast import literal_eval
 from sklearn.metrics import roc_auc_score
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
+
+try:
+    import wandb
+    HAS_WANDB = True
+except ImportError:
+    HAS_WANDB = False
 
 from config import config
 from model.base import BaseNewsRecommendationModel
@@ -126,7 +134,7 @@ def _parse_tokenized_title(title_str: str) -> torch.Tensor:
 class NewsDataset(Dataset):
     """Dataset for loading news articles during evaluation."""
     
-    def __init__(self, news_path: Union[Path, str]) -> None:
+    def __init__(self, news_path: Path | str) -> None:
         """Initialize news dataset.
         
         Args:
@@ -159,7 +167,7 @@ class NewsDataset(Dataset):
         """Return dataset size."""
         return len(self.news2dict)
     
-    def __getitem__(self, idx: int) -> Dict[str, Union[torch.Tensor, str]]:
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor | str]:
         """Get a news article.
         
         Args:
@@ -174,7 +182,7 @@ class NewsDataset(Dataset):
 class UserDataset(Dataset):
     """Dataset for loading user click histories during evaluation."""
     
-    def __init__(self, behaviors_path: Union[Path, str], user2int_path: Union[Path, str]) -> None:
+    def __init__(self, behaviors_path: Path | str, user2int_path: Path | str) -> None:
         """Initialize user dataset.
         
         Args:
@@ -212,7 +220,7 @@ class UserDataset(Dataset):
         """Return dataset size."""
         return len(self.behaviors)
     
-    def __getitem__(self, idx: int) -> Dict[str, Union[List[str], str]]:
+    def __getitem__(self, idx: int) -> Dict[str, List[str] | str]:
         """Get a user's click history.
         
         Args:
@@ -235,7 +243,7 @@ class UserDataset(Dataset):
 class BehaviorsDataset(Dataset):
     """Dataset for loading user behaviors during evaluation."""
     
-    def __init__(self, behaviors_path: Union[Path, str]) -> None:
+    def __init__(self, behaviors_path: Path | str) -> None:
         """Initialize behaviors dataset.
         
         Args:
@@ -264,23 +272,23 @@ class BehaviorsDataset(Dataset):
         """Return dataset size."""
         return len(self.behaviors)
     
-    def __getitem__(self, idx: int) -> Dict[str, Union[List[str], str]]:
-            """Get a behavior record.
+    def __getitem__(self, idx: int) -> Dict[str, List[str] | str]:
+        """Get a behavior record.
+        
+        Args:
+            idx: Record index
             
-            Args:
-                idx: Record index
-                
-            Returns:
-                Dictionary containing impression data
-            """
-            row = self.behaviors.iloc[idx]
-            return {
-                "impression_id": row.impression_id,
-                "user": row.user,
-                "time": row.time,
-                "clicked_news_string": row.clicked_news,
-                "impressions": row.impressions
-            }
+        Returns:
+            Dictionary containing impression data
+        """
+        row = self.behaviors.iloc[idx]
+        return {
+            "impression_id": row.impression_id,
+            "user": row.user,
+            "time": row.time,
+            "clicked_news_string": row.clicked_news,
+            "impressions": row.impressions
+        }
 
 
 @dataclass
@@ -394,7 +402,7 @@ def compute_user_vectors(model: BaseNewsRecommendationModel, user_dataset: UserD
 @dataclass
 class EvaluationParams:
     """Parameters for evaluation function."""
-    directory: Union[Path, str]
+    directory: Path | str
     num_workers: int
     news_dataset_built: Optional[NewsDataset] = None
     max_count: int = sys.maxsize
@@ -475,12 +483,25 @@ def evaluate(model: BaseNewsRecommendationModel, params: EvaluationParams) -> Tu
         results = pool.map(calculate_single_user_metric, tasks)
     
     aucs, mrrs, ndcg5s, ndcg10s = np.array(results).T
-    return (
-        float(np.nanmean(aucs)),
-        float(np.nanmean(mrrs)),
-        float(np.nanmean(ndcg5s)),
-        float(np.nanmean(ndcg10s))
-    )
+    auc_mean = float(np.nanmean(aucs))
+    mrr_mean = float(np.nanmean(mrrs))
+    ndcg5_mean = float(np.nanmean(ndcg5s))
+    ndcg10_mean = float(np.nanmean(ndcg10s))
+    
+    # Log final evaluation metrics to wandb
+    if HAS_WANDB and os.environ.get('WANDB_API_KEY'):
+        try:
+            wandb.log({
+                'final_eval/auc': auc_mean,
+                'final_eval/mrr': mrr_mean,
+                'final_eval/ndcg@5': ndcg5_mean,
+                'final_eval/ndcg@10': ndcg10_mean,
+                'final_eval/num_samples': len(tasks),
+            })
+        except Exception as e:
+            logger.warning(f"Failed to log metrics to wandb: {e}")
+    
+    return (auc_mean, mrr_mean, ndcg5_mean, ndcg10_mean)
 
 
 def find_latest_checkpoint(checkpoint_dir: Path) -> Optional[Path]:
@@ -529,13 +550,13 @@ if __name__ == '__main__':
         sys.exit(1)
     
     logger.info(f"Loading saved parameters from {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path, weights_only=False)
+    checkpoint = torch.load(checkpoint_path)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
     
-    # Evaluate on val set
+    # Evaluate on test set
     params = EvaluationParams(
-        directory=config.val_data_path,
+        directory=config.test_data_path,
         num_workers=config.num_workers
     )
     auc, mrr, ndcg5, ndcg10 = evaluate(model, params)

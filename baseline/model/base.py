@@ -70,3 +70,4 @@ class BaseNewsRecommendationModel(nn.Module, ABC):
             Click probability tensor with shape [candidate_size]
         """
         pass
+
