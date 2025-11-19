@@ -272,5 +272,5 @@ baseline/
 ## Credits
 
 - **Dataset**: Microsoft News Dataset (MIND). Learn more at [MIND](https://msnews.github.io/).
-- **Model**: Based on NRMS paper: [Neural News Recommendation with Multi-Head Self-Attention](https://www.aclweb.org/anthology/D19-1671/)
-- **Original Implementation**: Inspired by [news-recommendation](https://github.com/yusanshi/news-recommendation)
+- **Model**: Based on NRMS paper: [Revisiting Language Models in
+Neural News Recommender Systems](https://arxiv.org/pdf/2501.11391)
