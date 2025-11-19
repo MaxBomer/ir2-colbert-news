@@ -14,9 +14,13 @@ module load Anaconda3/2025.06-1
 
 source activate newsrec
 
-pip uninstall -y torch torchvision torchaudio
-pip install --index-url https://download.pytorch.org/whl/cu124 \
-  torch==2.6.0 torchvision torchaudio
+# Install local ColBERT package (required for pylate integration imports in factory)
+# Using 'colbert' assuming script is run from project root (based on baseline/train.py path)
+pip install -e colbert
+
+# Uninstall/Install torch if needed (preserved from your previous script)
+# pip uninstall -y torch torchvision torchaudio
+# pip install --index-url https://download.pytorch.org/whl/cu124 torch==2.6.0 torchvision torchaudio
 
 python - <<'EOF'
 import torch
@@ -29,10 +33,11 @@ echo ""
 
 export TOKENIZERS_PARALLELISM=false
 export MODEL_NAME=NRMSbert
+export BERT_MODEL=prajjwal1/bert-tiny
 
 srun python baseline/train.py \
-    --model_type NRMSbert \
-    --pretrained_model_name prajjwal1/bert-tiny \
+    --model_type $MODEL_NAME \
+    --pretrained_model_name $BERT_MODEL \
     --bert_version tiny \
     --word_embedding_dim 128 \
     --num_attention_heads 2 \
@@ -42,8 +47,8 @@ srun python baseline/train.py \
     --dropout_probability 0.1
 
 srun python baseline/evaluate.py \
-    --model_type NRMSbert \
-    --pretrained_model_name prajjwal1/bert-tiny \
+    --model_type $MODEL_NAME \
+    --pretrained_model_name $BERT_MODEL \
     --bert_version tiny \
     --word_embedding_dim 128 \
     --num_attention_heads 2 \

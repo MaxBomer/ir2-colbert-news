@@ -137,36 +137,6 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
         # Add trainable scoring layer for MaxSim output
         self.scoring_layer = nn.Linear(1, 1)
     
-    def _prune_tokens(self, input_ids: torch.Tensor, max_tokens: int) -> torch.Tensor:
-        """Truncate tokens to max_tokens length (ColBERT handles special tokens internally).
-        
-        Args:
-            input_ids: [batch_size, seq_len] or [seq_len]
-            max_tokens: Maximum number of tokens to keep
-            
-        Returns:
-            Truncated input_ids: [batch_size, max_tokens] or [max_tokens]
-        """
-        if input_ids.dim() == 1:
-            input_ids = input_ids.unsqueeze(0)
-            was_1d = True
-        else:
-            was_1d = False
-        
-        batch_size, seq_len = input_ids.shape
-        
-        # Simply truncate to max_tokens (ColBERT will handle special tokens)
-        if seq_len > max_tokens:
-            input_ids = input_ids[:, :max_tokens]
-        elif seq_len < max_tokens:
-            # Pad if needed
-            padding = torch.zeros(batch_size, max_tokens - seq_len, dtype=input_ids.dtype, device=input_ids.device)
-            input_ids = torch.cat([input_ids, padding], dim=1)
-        
-        if was_1d:
-            input_ids = input_ids.squeeze(0)
-        return input_ids
-    
     def _token_ids_to_text(self, input_ids: torch.Tensor) -> List[str]:
         """Convert token IDs back to text.
         
@@ -197,42 +167,25 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
         """
         Trainable ColBERT embedding function.
         Compatible with ColBERT-v1, v2, and PyLaTe wrapper.
+        
+        Uses PyLaTe's internal tokenize and forward methods to ensure:
+        1. [Q]/[D] markers are added
+        2. Query padding uses [MASK] tokens (for query expansion)
+        3. Linear projection layer is applied
+        4. Normalization is handled if configured (though we normalize again in MaxSim)
         """
+        # Use PyLaTe's tokenize to handle markers ([Q]/[D]) and query expansion ([MASK] padding)
+        features = self.colbert_model.tokenize(texts, is_query=is_query)
+        
+        # Move all features to device
+        features = {k: v.to(device) for k, v in features.items()}
 
-        # Tokenize with ColBERT tokenizer
-        inputs = self.colbert_model.tokenizer(
-            texts,
-            padding="max_length",
-            truncation=True,
-            max_length=self.max_query_tokens if is_query else self.max_doc_tokens,
-            return_tensors="pt"
-        ).to(device)
+        # Forward pass through SentenceTransformer modules (Transformer + Dense)
+        # This ensures the projection layer is applied
+        outputs = self.colbert_model(features)
 
-        # Now get HF encoder (.transformers_model from Pylate)
-        encoder = getattr(self.colbert_model, "transformers_model", None)
-        if encoder is None:
-            raise RuntimeError(
-                "ColBERT model has no HF encoder (.transformers_model). "
-                "Check PyLaTe version / ColBERT checkpoint."
-            )
-
-        # Forward pass through HF encoder
-        outputs = encoder(
-            input_ids=inputs["input_ids"],
-            attention_mask=inputs["attention_mask"]
-        )
-
-        # Go from hidden states to token embeddings
-        token_embeddings = outputs.last_hidden_state
-
-        # Apply ColBERT projection layer (only if it is present)
-        if hasattr(self.colbert_model, "linear"):
-            token_embeddings = self.colbert_model.linear(token_embeddings)
-
-        # Optional dimensional truncation
-        truncate_dim = getattr(self.colbert_model, "truncate_dim", None)
-        if callable(truncate_dim):
-            token_embeddings = truncate_dim(token_embeddings)
+        # Extract token embeddings
+        token_embeddings = outputs["token_embeddings"]
 
         return token_embeddings
     
@@ -258,8 +211,7 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
         
         # Encode candidate news as documents (keep token-level embeddings)
         all_candidate_input_ids = torch.cat([x["title"][:, 0] for x in candidate_news], dim=0)
-        # Prune tokens for documents
-        all_candidate_input_ids = self._prune_tokens(all_candidate_input_ids, self.max_doc_tokens)
+        # Convert to text (Pylate handles truncation/padding/markers internally)
         all_candidate_texts = self._token_ids_to_text(all_candidate_input_ids)
         
         candidate_token_embeddings = self._encode_with_colbert(
@@ -279,8 +231,7 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
         
         # Encode clicked news as queries (keep token-level embeddings)
         all_clicked_input_ids = torch.cat([x["title"][:, 0] for x in clicked_news], dim=0)
-        # Prune tokens for queries
-        all_clicked_input_ids = self._prune_tokens(all_clicked_input_ids, self.max_query_tokens)
+        # Convert to text (Pylate handles truncation/padding/markers internally)
         all_clicked_texts = self._token_ids_to_text(all_clicked_input_ids)
         
         clicked_token_embeddings = self._encode_with_colbert(
@@ -363,7 +314,7 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
     
         # Convert token IDs back to text
         input_ids = news["title"][:, 0]
-        input_ids = self._prune_tokens(input_ids, self.max_doc_tokens)
+        # Pylate handles truncation internally
         texts = self._token_ids_to_text(input_ids)
     
         # Use no-grad
