@@ -14,9 +14,6 @@ module load Anaconda3/2025.06-1
 
 source activate newsrec
 
-# Install uv if not available
-pip install uv
-
 # Install local ColBERT package (required for pylate integration imports in factory)
 # Using 'colbert' assuming script is run from project root (based on baseline/train.py path)
 pip install -e colbert
@@ -38,7 +35,7 @@ export TOKENIZERS_PARALLELISM=false
 export MODEL_NAME=NRMSbert
 export BERT_MODEL=prajjwal1/bert-tiny
 
-srun uv run python baseline/train.py \
+srun run python baseline/train.py \
     --model_type $MODEL_NAME \
     --pretrained_model_name $BERT_MODEL \
     --bert_version tiny \
@@ -49,7 +46,7 @@ srun uv run python baseline/train.py \
     --batch_size 32 \
     --dropout_probability 0.1
 
-srun uv run python baseline/evaluate.py \
+srun run python baseline/evaluate.py \
     --model_type $MODEL_NAME \
     --pretrained_model_name $BERT_MODEL \
     --bert_version tiny \
