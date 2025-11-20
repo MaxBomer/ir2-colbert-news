@@ -20,6 +20,7 @@ if str(colbert_path) not in sys.path:
 
 from pylate import models as colbert_models
 from transformers import AutoTokenizer
+from sentence_transformers.util import batch_to_device
 
 from config import NRMSbertConfig
 from model.base import BaseNewsRecommendationModel
@@ -193,47 +194,65 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
         """Generate cache key for text."""
         return f"{'query' if is_query else 'doc'}:{text}"
     
-    def _encode_with_colbert(self, texts, is_query, device):
+    # def _encode_with_colbert(self, texts, is_query, device):
+    #     """
+    #     Trainable ColBERT embedding function.
+    #     Compatible with ColBERT-v1, v2, and PyLaTe wrapper.
+    #     """
+
+    #     # Tokenize with ColBERT tokenizer
+    #     inputs = self.colbert_model.tokenizer(
+    #         texts,
+    #         padding="max_length",
+    #         truncation=True,
+    #         max_length=self.max_query_tokens if is_query else self.max_doc_tokens,
+    #         return_tensors="pt"
+    #     ).to(device)
+
+    #     # Now get HF encoder (.transformers_model from Pylate)
+    #     encoder = getattr(self.colbert_model, "transformers_model", None)
+    #     if encoder is None:
+    #         raise RuntimeError(
+    #             "ColBERT model has no HF encoder (.transformers_model). "
+    #             "Check PyLaTe version / ColBERT checkpoint."
+    #         )
+
+    #     # Forward pass through HF encoder
+    #     outputs = encoder(
+    #         input_ids=inputs["input_ids"],
+    #         attention_mask=inputs["attention_mask"]
+    #     )
+
+    #     # Go from hidden states to token embeddings
+    #     token_embeddings = outputs.last_hidden_state
+
+    #     # Apply ColBERT projection layer (only if it is present)
+    #     if hasattr(self.colbert_model, "linear"):
+    #         token_embeddings = self.colbert_model.linear(token_embeddings)
+
+    #     # Optional dimensional truncation
+    #     truncate_dim = getattr(self.colbert_model, "truncate_dim", None)
+    #     if callable(truncate_dim):
+    #         token_embeddings = truncate_dim(token_embeddings)
+
+    #     return token_embeddings
+    
+    def _encode_with_colbert(self, texts, is_query: bool, device):
         """
-        Trainable ColBERT embedding function.
-        Compatible with ColBERT-v1, v2, and PyLaTe wrapper.
+        Trainable ColBERT embedding function using PyLaTe's own tokenize + forward.
+        This keeps query/document prefixes, query expansion, projection layers, etc.
         """
-
-        # Tokenize with ColBERT tokenizer
-        inputs = self.colbert_model.tokenizer(
-            texts,
-            padding="max_length",
-            truncation=True,
-            max_length=self.max_query_tokens if is_query else self.max_doc_tokens,
-            return_tensors="pt"
-        ).to(device)
-
-        # Now get HF encoder (.transformers_model from Pylate)
-        encoder = getattr(self.colbert_model, "transformers_model", None)
-        if encoder is None:
-            raise RuntimeError(
-                "ColBERT model has no HF encoder (.transformers_model). "
-                "Check PyLaTe version / ColBERT checkpoint."
-            )
-
-        # Forward pass through HF encoder
-        outputs = encoder(
-            input_ids=inputs["input_ids"],
-            attention_mask=inputs["attention_mask"]
+        # Build features using ColBERT's tokenizer & settings
+        features = self.colbert_model.tokenize(
+            texts=texts,
+            is_query=is_query,
+            pad=True,
         )
-
-        # Go from hidden states to token embeddings
-        token_embeddings = outputs.last_hidden_state
-
-        # Apply ColBERT projection layer (only if it is present)
-        if hasattr(self.colbert_model, "linear"):
-            token_embeddings = self.colbert_model.linear(token_embeddings)
-
-        # Optional dimensional truncation
-        truncate_dim = getattr(self.colbert_model, "truncate_dim", None)
-        if callable(truncate_dim):
-            token_embeddings = truncate_dim(token_embeddings)
-
+        # Send to device
+        features = batch_to_device(features, device)
+        # Forward through ColBERT (no torch.no_grad here -> trainable)
+        out_features = self.colbert_model(input=features)
+        token_embeddings = out_features["token_embeddings"]  # [batch, seq_len, dim]
         return token_embeddings
     
     def forward(

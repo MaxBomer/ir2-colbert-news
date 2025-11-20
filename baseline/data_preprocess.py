@@ -327,7 +327,7 @@ def main() -> None:
     parser.add_argument(
         '--original_data_path',
         type=str,
-        default='./data/original',
+        default='data_downsampled_20k/original',
         help='Path to original data directory'
     )
     parser.add_argument(

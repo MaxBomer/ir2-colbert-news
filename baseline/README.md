@@ -106,8 +106,8 @@ uv run python train.py \
     --bert_version tiny \
     --word_embedding_dim 128 \
     --num_attention_heads 2 \
-    --finetune_layers 2 \
-    --batch_size 32 \
+    --finetune_layers 4 \
+    --batch_size 16 \
     --learning_rate 0.0001 \
     --dropout_probability 0.2
 
@@ -158,7 +158,7 @@ uv run python train.py \
     --model_type NRMSbert \
     --pretrained_model_name prajjwal1/bert-tiny \
     --bert_version tiny \
-    --batch_size 32 \
+    --batch_size 16 \
     --test_run
 
 # Test ColBERT: 10 batches, validate on 100 samples
@@ -166,14 +166,14 @@ uv run python train.py \
     --model_type ColBERT \
     --pretrained_model_name prajjwal1/bert-tiny \
     --bert_version tiny \
-    --batch_size 32 \
+    --batch_size 16 \
     --test_run
 
 # Or limit to specific number of batches
 uv run python train.py \
     --pretrained_model_name prajjwal1/bert-tiny \
     --bert_version tiny \
-    --batch_size 32 \
+    --batch_size 16 \
     --max_batches 50 \
     --max_validation_samples 1000
 ```
@@ -203,8 +203,8 @@ uv run python evaluate.py \
     --bert_version tiny \
     --word_embedding_dim 128 \
     --num_attention_heads 2 \
-    --finetune_layers 2 \
-    --batch_size 32
+    --finetune_layers 4 \
+    --batch_size 16
 
 # Or evaluate with BERT base
 uv run python evaluate.py \

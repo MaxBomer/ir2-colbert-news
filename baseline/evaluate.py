@@ -543,20 +543,20 @@ if __name__ == '__main__':
     # Load model
     model = create_model(config).to(device)
     
-    # Find and load checkpoint
-    checkpoint_path = find_latest_checkpoint(config.checkpoint_dir)
-    if checkpoint_path is None:
-        logger.error('No checkpoint file found!')
-        sys.exit(1)
+    # # Find and load checkpoint
+    # checkpoint_path = find_latest_checkpoint(config.checkpoint_dir)
+    # if checkpoint_path is None:
+    #     logger.error('No checkpoint file found!')
+    #     sys.exit(1)
     
-    logger.info(f"Loading saved parameters from {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path)
-    model.load_state_dict(checkpoint['model_state_dict'])
+    # logger.info(f"Loading saved parameters from {checkpoint_path}")
+    # checkpoint = torch.load(checkpoint_path)
+    # model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
     
     # Evaluate on test set
     params = EvaluationParams(
-        directory=config.test_data_path,
+        directory=config.val_data_path,
         num_workers=config.num_workers
     )
     auc, mrr, ndcg5, ndcg10 = evaluate(model, params)

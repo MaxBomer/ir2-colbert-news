@@ -14,13 +14,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--current_data_path',
         type=str,
-        default='../data',
+        default='data_downsampled_20k',
         help='Path to processed data and checkpoints (default: ../data)'
     )
     parser.add_argument(
         '--original_data_path',
         type=str,
-        default='../data/original',
+        default='data_downsampled_20k/original',
         help='Path to original data directory (default: ../data/original)'
     )
     

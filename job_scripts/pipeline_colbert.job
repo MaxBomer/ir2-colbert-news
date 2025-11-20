@@ -10,15 +10,19 @@
 
 module purge
 module load 2025
-module load Anaconda3/2025.06-1
 
-source activate newsrec
+cd $HOME/ir2-colbert-news/baseline
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+uv sync --locked
 
-pip uninstall -y torch torchvision torchaudio
-pip install --index-url https://download.pytorch.org/whl/cu124 \
-  torch==2.6.0 torchvision torchaudio
+# source activate newsrec
 
-python - <<'EOF'
+# pip uninstall -y torch torchvision torchaudio
+# pip install --index-url https://download.pytorch.org/whl/cu124 \
+#   torch==2.6.0 torchvision torchaudio
+
+uv run python - <<'EOF'
 import torch
 print(f"CUDA available: {torch.cuda.is_available()}")
 if torch.cuda.is_available():
@@ -30,24 +34,60 @@ echo ""
 export TOKENIZERS_PARALLELISM=false
 export MODEL_NAME=ColBERT
 
-srun python baseline/train.py \
-    --model_type ColBERT \
-    --pretrained_model_name colbert-ir/colbertv2.0 \
-    --colbert_model_name colbert-ir/colbertv2.0 \
-    --colbert_embedding_dim 128 \
-    --colbert_max_query_tokens 32 \
-    --colbert_max_doc_tokens 128 \
-    --learning_rate 1e-5 \
-    --batch_size 4 \
-    --dropout_probability 0.1
+# prajjwal1/bert-tiny
+# srun uv run train.py \
+#     --model_type ColBERT \
+#     --pretrained_model_name prajjwal1/bert-tiny \
+#     --colbert_model_name prajjwal1/bert-tiny \
+#     --colbert_embedding_dim 128 \
+#     --colbert_max_query_tokens 32 \
+#     --colbert_max_doc_tokens 128 \
+#     --word_embedding_dim 128 \
+#     --num_attention_heads 2 \
+#     --finetune_layers 4 \
+#     --learning_rate 1e-4 \
+#     --batch_size 64 \
+#     --dropout_probability 0.2
 
-srun python baseline/evaluate.py \
+# srun uv run evaluate.py \
+#     --model_type ColBERT \
+#     --pretrained_model_name prajjwal1/bert-tiny \
+#     --colbert_model_name prajjwal1/bert-tiny \
+#     --colbert_embedding_dim 128 \
+#     --colbert_max_query_tokens 32 \
+#     --colbert_max_doc_tokens 128 \
+#     --word_embedding_dim 128 \
+#     --num_attention_heads 2 \
+#     --finetune_layers 4 \
+#     --learning_rate 1e-4 \
+#     --batch_size 64 \
+#     --dropout_probability 0.2
+
+# colbert-ir/colbertv2.0
+# srun uv run train.py \
+#     --model_type ColBERT \
+#     --pretrained_model_name colbert-ir/colbertv2.0 \
+#     --colbert_model_name colbert-ir/colbertv2.0 \
+#     --colbert_embedding_dim 768 \
+#     --colbert_max_query_tokens 32 \
+#     --colbert_max_doc_tokens 768 \
+#     --word_embedding_dim 768 \
+#     --num_attention_heads 2 \
+#     --finetune_layers 4 \
+#     --learning_rate 1e-4 \
+#     --batch_size 32 \
+#     --dropout_probability 0.2
+
+srun uv run evaluate.py \
     --model_type ColBERT \
     --pretrained_model_name colbert-ir/colbertv2.0 \
     --colbert_model_name colbert-ir/colbertv2.0 \
-    --colbert_embedding_dim 128 \
+    --colbert_embedding_dim 768 \
     --colbert_max_query_tokens 32 \
-    --colbert_max_doc_tokens 128 \
-    --learning_rate 1e-5 \
-    --batch_size 4 \
-    --dropout_probability 0.1
+    --colbert_max_doc_tokens 768 \
+    --word_embedding_dim 768 \
+    --num_attention_heads 2 \
+    --finetune_layers 4 \
+    --learning_rate 1e-4 \
+    --batch_size 32 \
+    --dropout_probability 0.2
