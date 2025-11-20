@@ -35,7 +35,7 @@ export TOKENIZERS_PARALLELISM=false
 export MODEL_NAME=NRMSbert
 export BERT_MODEL=prajjwal1/bert-tiny
 
-srun run python baseline/train.py \
+srun python baseline/train.py \
     --model_type $MODEL_NAME \
     --pretrained_model_name $BERT_MODEL \
     --bert_version tiny \
@@ -46,7 +46,7 @@ srun run python baseline/train.py \
     --batch_size 32 \
     --dropout_probability 0.1
 
-srun run python baseline/evaluate.py \
+srun python baseline/evaluate.py \
     --model_type $MODEL_NAME \
     --pretrained_model_name $BERT_MODEL \
     --bert_version tiny \

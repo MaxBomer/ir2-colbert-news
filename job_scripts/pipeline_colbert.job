@@ -18,7 +18,7 @@ source activate newsrec
 # Install local ColBERT package (required for pylate integration)
 # uv pip install -e ../colbert  <-- UV doesn't easily support editable local installs in existing venvs without setup
 # So we use standard pip for the local editable install
-pip install -e ../colbert
+pip install -e colbert # Assuming script runs from root
 
 # Uninstall/Install torch if needed (preserved from your previous script)
 # pip uninstall -y torch torchvision torchaudio
@@ -38,7 +38,7 @@ export TOKENIZERS_PARALLELISM=false
 export MODEL_NAME=ColBERT
 export BERT_MODEL=prajjwal1/bert-tiny
 
-srun run python baseline/train.py \
+srun python baseline/train.py \
     --model_type $MODEL_NAME \
     --pretrained_model_name $BERT_MODEL \
     --colbert_embedding_dim 128 \
@@ -50,7 +50,7 @@ srun run python baseline/train.py \
     --dropout_probability 0.2
 
 # Evaluate after training
-srun run python baseline/evaluate.py \
+srun python baseline/evaluate.py \
     --model_type $MODEL_NAME \
     --pretrained_model_name $BERT_MODEL \
     --colbert_embedding_dim 128 \
