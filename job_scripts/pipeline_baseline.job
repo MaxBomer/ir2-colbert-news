@@ -11,7 +11,7 @@
 module purge
 module load 2025
 
-cd $HOME/ir2-colbert-news/baseline
+cd $HOME/ir2-colbert-news
 curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 uv sync --locked
@@ -33,7 +33,7 @@ export TOKENIZERS_PARALLELISM=false
 export MODEL_NAME=NRMSbert
 export BERT_MODEL=prajjwal1/bert-tiny
 
-srun python baseline/train.py \
+srun uv run python baseline/train.py \
     --model_type $MODEL_NAME \
     --pretrained_model_name $BERT_MODEL \
     --bert_version tiny \
@@ -44,7 +44,7 @@ srun python baseline/train.py \
     --batch_size 32 \
     --dropout_probability 0.1
 
-srun python baseline/evaluate.py \
+srun uv run python baseline/evaluate.py \
     --model_type $MODEL_NAME \
     --pretrained_model_name $BERT_MODEL \
     --bert_version tiny \
