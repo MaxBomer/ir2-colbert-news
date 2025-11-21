@@ -29,11 +29,17 @@ if torch.cuda.is_available():
 EOF
 echo ""
 
+# Load environment variables from .env if it exists
+if [ -f .env ]; then
+    export $(grep -v '^#' .env | xargs)
+fi
+
 export TOKENIZERS_PARALLELISM=false
 export MODEL_NAME=NRMSbert
 export BERT_MODEL=prajjwal1/bert-tiny
 
 srun uv run python baseline/train.py \
+    --current_data_path data \
     --model_type $MODEL_NAME \
     --pretrained_model_name $BERT_MODEL \
     --bert_version tiny \
@@ -45,6 +51,7 @@ srun uv run python baseline/train.py \
     --dropout_probability 0.1
 
 srun uv run python baseline/evaluate.py \
+    --current_data_path data \
     --model_type $MODEL_NAME \
     --pretrained_model_name $BERT_MODEL \
     --bert_version tiny \
