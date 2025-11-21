@@ -218,8 +218,9 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
         if isinstance(clicked_news_mask, torch.Tensor):
             clicked_news_mask_tensor = clicked_news_mask.to(device=device, dtype=torch.float32)
         elif isinstance(clicked_news_mask, list) and len(clicked_news_mask) > 0 and isinstance(clicked_news_mask[0], torch.Tensor):
-            # Handle list of tensors (which torch.tensor() fails on for multi-element tensors)
-            clicked_news_mask_tensor = torch.stack(clicked_news_mask).to(device=device, dtype=torch.float32)
+            # Handle list of tensors (usually [num_clicked] tensors of shape [batch_size])
+            # We want [batch_size, num_clicked], so stack along dim 1
+            clicked_news_mask_tensor = torch.stack(clicked_news_mask, dim=1).to(device=device, dtype=torch.float32)
         else:
             clicked_news_mask_tensor = torch.tensor(clicked_news_mask, device=device, dtype=torch.float32)
             
