@@ -217,6 +217,9 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
         # We need to handle masking to avoid interacting with padded news
         if isinstance(clicked_news_mask, torch.Tensor):
             clicked_news_mask_tensor = clicked_news_mask.to(device=device, dtype=torch.float32)
+        elif isinstance(clicked_news_mask, list) and len(clicked_news_mask) > 0 and isinstance(clicked_news_mask[0], torch.Tensor):
+            # Handle list of tensors (which torch.tensor() fails on for multi-element tensors)
+            clicked_news_mask_tensor = torch.stack(clicked_news_mask).to(device=device, dtype=torch.float32)
         else:
             clicked_news_mask_tensor = torch.tensor(clicked_news_mask, device=device, dtype=torch.float32)
             
