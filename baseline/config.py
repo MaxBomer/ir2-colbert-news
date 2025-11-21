@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 
+
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Configuration for NRMSbert model")
@@ -29,7 +30,7 @@ def parse_args() -> argparse.Namespace:
         '--model_type',
         type=str,
         default='NRMSbert',
-        choices=['NRMSbert', 'ColBERT'],
+        choices=['NRMSbert', 'ColBERT', 'Random'],
         help='Model type: NRMSbert or ColBERT'
     )
     parser.add_argument(
@@ -207,8 +208,8 @@ class NRMSbertConfig:
     
     # Fields with defaults (must come after fields without defaults)
     # ColBERT-specific parameters (optional)
-    colbert_model_name: str | None = None
-    colbert_embedding_dim: int | None = None
+    colbert_model_name: Optional[str] = None
+    colbert_embedding_dim: Optional[int] = None
     colbert_max_query_tokens: int = 32
     colbert_max_doc_tokens: int = 128
     colbert_enable_caching: bool = False

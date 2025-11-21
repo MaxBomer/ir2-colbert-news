@@ -6,12 +6,14 @@ import torch.nn as nn
 from config import NRMSbertConfig
 from model.base import BaseNewsRecommendationModel
 from model.ColBERT import ColBERTNewsRecommendationModel
+from model.Random.random_model import RandomNewsRecommendationModel
 from model.NRMSbert import NRMSbert
 
 
 _MODEL_REGISTRY: dict[str, Type[BaseNewsRecommendationModel]] = {
     'NRMSbert': NRMSbert,
     'ColBERT': ColBERTNewsRecommendationModel,
+    'Random': RandomNewsRecommendationModel,
 }
 
 

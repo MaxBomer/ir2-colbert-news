@@ -419,7 +419,10 @@ def evaluate(model: BaseNewsRecommendationModel, params: EvaluationParams) -> Tu
     Returns:
         Tuple of (AUC, MRR, nDCG@5, nDCG@10)
     """
-    device = next(model.parameters()).device
+    try:
+        device = next(model.parameters()).device
+    except StopIteration:
+        device = torch.device("cpu")
     directory = Path(params.directory)
     eval_config = EvaluationConfig(max_count=params.max_count)
     
@@ -544,15 +547,19 @@ if __name__ == '__main__':
     model = create_model(config).to(device)
     
     # Find and load checkpoint
-    checkpoint_path = find_latest_checkpoint(config.checkpoint_dir)
-    if checkpoint_path is None:
-        logger.error('No checkpoint file found!')
-        sys.exit(1)
-    
-    logger.info(f"Loading saved parameters from {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model.eval()
+    if config.model_type == "Random":
+        logger.info("Random model selected — skipping checkpoint loading.")
+        model.eval()
+    else:
+        checkpoint_path = find_latest_checkpoint(config.checkpoint_dir)
+        if checkpoint_path is None:
+            logger.error('No checkpoint file found!')
+            sys.exit(1)
+
+        logger.info(f"Loading saved parameters from {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.eval()
     
     # Evaluate on test set
     params = EvaluationParams(
