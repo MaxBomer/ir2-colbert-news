@@ -143,6 +143,13 @@ def parse_args() -> argparse.Namespace:
         help='Maximum number of validation samples to evaluate (default: 200000)'
     )
     
+    parser.add_argument(
+        '--num_epochs',
+        type=int,
+        default=100,
+        help='Number of training epochs (default: 100)'
+    )
+    
     # Data preprocessing parameters (updated after preprocessing)
     parser.add_argument(
         '--num_categories',
@@ -321,6 +328,7 @@ def create_config() -> NRMSbertConfig:
         test_run=args.test_run,
         max_batches=args.max_batches,
         max_validation_samples=args.max_validation_samples if not args.test_run else 100,
+        num_epochs=args.num_epochs,
         num_categories=num_categories,
         num_words=num_words,
         num_entities=num_entities,
