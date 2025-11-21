@@ -227,7 +227,7 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
         expanded_mask = clicked_news_mask_tensor.unsqueeze(-1).unsqueeze(-1)
         
         # Zero out embeddings of padded news
-        clicked_token_embeddings = clicked_token_embeddings * clicked_news_mask_tensor
+        clicked_token_embeddings = clicked_token_embeddings * expanded_mask
         
         # Flatten to [batch_size, total_query_tokens, dim]
         # total_query_tokens = num_clicked * num_tokens_per_news
