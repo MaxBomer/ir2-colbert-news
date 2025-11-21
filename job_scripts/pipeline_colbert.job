@@ -30,7 +30,6 @@ EOF
 echo ""
 
 export TOKENIZERS_PARALLELISM=false
-# Use TinyBERT as requested by your colleagues
 export MODEL_NAME=ColBERT
 export BERT_MODEL=prajjwal1/bert-tiny
 
