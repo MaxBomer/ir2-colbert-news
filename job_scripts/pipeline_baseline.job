@@ -43,6 +43,7 @@ if [ ! -f "data/tiny/train/behaviors_parsed.tsv" ]; then
     srun uv run python baseline/download_and_setup_data.py --data_dir data/original
     
     echo "Running data preprocessing..."
+    # 2. Preprocess (Original -> Processed/Tiny)
     srun uv run python baseline/data_preprocess.py --original_data_path data/original
 fi
 

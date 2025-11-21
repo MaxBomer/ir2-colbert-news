@@ -215,12 +215,16 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
         
         # 3. Flatten User History (Concatenate all tokens from all clicked news)
         # We need to handle masking to avoid interacting with padded news
-        clicked_news_mask_tensor = torch.tensor(clicked_news_mask, device=device, dtype=torch.float32)
+        if isinstance(clicked_news_mask, torch.Tensor):
+            clicked_news_mask_tensor = clicked_news_mask.to(device=device, dtype=torch.float32)
+        else:
+            clicked_news_mask_tensor = torch.tensor(clicked_news_mask, device=device, dtype=torch.float32)
+            
         # [batch_size, num_clicked] -> [batch_size, num_clicked, 1, 1]
         expanded_mask = clicked_news_mask_tensor.unsqueeze(-1).unsqueeze(-1)
         
         # Zero out embeddings of padded news
-        clicked_token_embeddings = clicked_token_embeddings * expanded_mask
+        clicked_token_embeddings = clicked_token_embeddings * clicked_news_mask_tensor
         
         # Flatten to [batch_size, total_query_tokens, dim]
         # total_query_tokens = num_clicked * num_tokens_per_news
