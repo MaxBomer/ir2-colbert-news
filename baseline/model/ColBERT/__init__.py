@@ -284,7 +284,9 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
         batch_size, num_clicked, num_tokens, dim = clicked_news_vector.shape
         
         # Flatten the clicked news and tokens
-        return clicked_news_vector.view(batch_size, -1, dim)
+        # Use reshape instead of view because the input tensor might be non-contiguous
+        # due to transposing/stacking in evaluate.py
+        return clicked_news_vector.reshape(batch_size, -1, dim)
     
     def get_prediction(
         self, news_vector: torch.Tensor, user_vector: torch.Tensor
