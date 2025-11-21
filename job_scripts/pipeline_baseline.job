@@ -34,6 +34,23 @@ if [ -f .env ]; then
     export $(grep -v '^#' .env | xargs)
 fi
 
+# Check if data exists, if not run data setup and preprocessing
+if [ ! -f "data/tiny/train/behaviors_parsed.tsv" ]; then
+    echo "Data not found at data/tiny/train/behaviors_parsed.tsv"
+    echo "Running data download and setup..."
+    
+    # 1. Download and Setup (Raw -> Original)
+    srun uv run python baseline/download_and_setup_data.py --data_dir data/original
+    
+    echo "Running data preprocessing..."
+    # 2. Preprocess (Original -> Processed/Tiny)
+    srun uv run python baseline/data_preprocess.py \
+        --original_data_path data/original \
+        --output_path data \
+        --bert_version tiny \
+        --word_embedding_dim 128
+fi
+
 export TOKENIZERS_PARALLELISM=false
 export MODEL_NAME=NRMSbert
 export BERT_MODEL=prajjwal1/bert-tiny
