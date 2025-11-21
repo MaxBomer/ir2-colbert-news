@@ -46,7 +46,6 @@ if [ ! -f "data/tiny/train/behaviors_parsed.tsv" ]; then
     # 2. Preprocess (Original -> Processed/Tiny)
     srun uv run python baseline/data_preprocess.py \
         --original_data_path data/original \
-        --output_path data \
         --bert_version tiny \
         --word_embedding_dim 128
 fi
