@@ -340,8 +340,9 @@ def compute_news_vectors(model: BaseNewsRecommendationModel, news_dataset: NewsD
         
         if any(news_id not in news2vector for news_id in news_ids):
             news_vectors = model.get_news_vector(batch_dict)
-            if len(news_ids) == 1:
-                news_vectors = news_vectors.unsqueeze(0)
+            # Removed the unsqueeze logic here because get_news_vector should always return [batch_size, ...]
+            # And torch.stack handles single items correctly if they are not squeezed.
+            
             for news_id, vector in zip(news_ids, news_vectors):
                 if news_id not in news2vector:
                     news2vector[news_id] = vector

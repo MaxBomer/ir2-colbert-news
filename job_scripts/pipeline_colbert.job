@@ -10,21 +10,17 @@
 
 module purge
 module load 2025
-module load Anaconda3/2025.06-1
 
-source activate newsrec
+cd $HOME/ir2-colbert-news/baseline
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+uv sync --locked
 
-
-# Install local ColBERT package (required for pylate integration)
-# uv pip install -e ../colbert  <-- UV doesn't easily support editable local installs in existing venvs without setup
-# So we use standard pip for the local editable install
-pip install -e colbert # Assuming script runs from root
-
-# Uninstall/Install torch if needed (preserved from your previous script)
 # pip uninstall -y torch torchvision torchaudio
-# pip install --index-url https://download.pytorch.org/whl/cu124 torch==2.6.0 torchvision torchaudio
+# pip install --index-url https://download.pytorch.org/whl/cu124 \
+#   torch==2.6.0 torchvision torchaudio
 
-python - <<'EOF'
+uv run python - <<'EOF'
 import torch
 print(f"CUDA available: {torch.cuda.is_available()}")
 if torch.cuda.is_available():
