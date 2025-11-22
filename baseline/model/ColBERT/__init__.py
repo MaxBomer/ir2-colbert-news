@@ -130,7 +130,18 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
 
         # Add trainable scoring layer for MaxSim output if needed (NRMS usually has one)
         self.scoring_layer = nn.Linear(1, 1)
-    
+        
+        # Attention layer for aggregation
+        if config.colbert_aggregation == 'attention':
+            # Simple additive attention: Score -> Weight
+            # Or more complex: User_Item_Emb + Candidate_Emb -> Weight?
+            # For now, let's use a simple learnable scalar to scale scores before softmax
+            # Or a small MLP on the item_scores?
+            # NRMS uses: v_u = sum(alpha_i * v_i). alpha_i = softmax(v_i^T * W * v_query)
+            # But we have scalar scores here.
+            # Let's implement "Score Attention": alpha_i = softmax(W * S_i + b)
+            self.attention_linear = nn.Linear(1, 1)
+            
     def _token_ids_to_text(self, input_ids: torch.Tensor) -> List[str]:
         """Convert token IDs back to text. (Legacy - slow)"""
         if input_ids.dim() == 1:
@@ -404,26 +415,37 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
             # [num_clicked]
             item_scores = maxsim_score(user_hist_flat, cand_emb_expanded)
             
-            # Masking?
-            # evaluate.py passes 'PADDED_NEWS' embeddings.
-            # We assume PADDED_NEWS has valid embeddings (zeros or random).
-            # MaxSim against Zero vector -> 0 score?
-            # If 'PADDED_NEWS' is all zeros, dot product is 0.
-            # If real news gives positive scores, 0 is fine?
-            # If real news gives negative scores, 0 is bad.
-            # Ideally we should mask. But evaluate.py doesn't pass the mask to get_prediction.
-            # However, PADDED_NEWS usually has ID 0.
-            # If the model learned that PAD = ignore, it might handle it.
-            # For rigorous eval, we should check if embedding is all zeros (if we implemented it that way).
-            # In evaluate.py, PADDED_NEWS vector is zeros_like(news).
-            # So MaxSim will be 0.
-            # If real scores are > 0, then max(scores) will pick real news.
-            # If real scores are < 0, then 0 (padding) will be picked -> bad.
-            # MaxSim (Cosine) is usually [-1, 1].
-            # We normalized in maxsim_score.
-            # If we assume good matches > 0, we are fine.
+            # We don't have mask in inference usually (evaluate.py). 
+            # But 'PADDED_NEWS' embeddings are zero.
+            # MaxSim with zero vector -> 0.
             
-            final_score = item_scores.max()
+            if getattr(self.config, 'colbert_aggregation', 'max') == 'max':
+                final_score = item_scores.max()
+            elif self.config.colbert_aggregation == 'mean':
+                # Simple mean (assume all non-zero are real? or just mean all 50?)
+                # evaluate.py pads to 50. If user clicked 5, we have 45 zeros.
+                # Mean of (5 real + 45 zeros) / 50 is diluted.
+                # We really need the mask here to do it right.
+                # But BaseNewsRecommendationModel.get_prediction doesn't accept mask.
+                # Workaround: Check for non-zero embeddings in user_vector?
+                # user_vector: [1, 50, 32, 128]
+                # Check if sum(abs) > 0
+                is_real = (user_hist_flat.abs().sum(dim=(1,2)) > 1e-6).float() # [num_clicked]
+                real_scores = item_scores * is_real
+                final_score = real_scores.sum() / is_real.sum().clamp(min=1.0)
+                
+            elif self.config.colbert_aggregation == 'attention':
+                # Softmax over scores
+                # Mask out zeros (pads) -> -inf
+                is_real = (user_hist_flat.abs().sum(dim=(1,2)) > 1e-6)
+                mask_val = (~is_real).float() * -1e9
+                masked_scores = item_scores + mask_val
+                weights = F.softmax(masked_scores, dim=0)
+                final_score = (weights * item_scores).sum()
+                
+            else:
+                final_score = item_scores.max()
+                
             scores.append(final_score)
             
         return torch.stack(scores)

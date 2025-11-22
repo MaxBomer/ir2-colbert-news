@@ -79,6 +79,13 @@ def parse_args() -> argparse.Namespace:
         help='Freeze ColBERT weights (only train scoring layer)'
     )
     parser.add_argument(
+        '--colbert_aggregation',
+        type=str,
+        default='max',
+        choices=['max', 'mean', 'attention'],
+        help='Aggregation method for user history (max, mean, attention)'
+    )
+    parser.add_argument(
         '--bert_version',
         type=str,
         default='tiny',
@@ -226,6 +233,7 @@ class NRMSbertConfig:
     colbert_enable_caching: bool = False
     colbert_cache_size: int = 10000
     colbert_freeze_weights: bool = False
+    colbert_aggregation: str = 'max'  # 'max', 'mean', or 'attention'
     query_vector_dim: int = 200
     num_epochs: int = 100
     num_batches_show_loss: int = 100
@@ -328,6 +336,7 @@ def create_config() -> NRMSbertConfig:
         colbert_enable_caching=args.colbert_enable_caching,
         colbert_cache_size=args.colbert_cache_size,
         colbert_freeze_weights=args.colbert_freeze_weights,
+        colbert_aggregation=args.colbert_aggregation,
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         dropout_probability=args.dropout_probability,
