@@ -74,6 +74,11 @@ def parse_args() -> argparse.Namespace:
         help='Maximum number of cached embeddings (default: 10000)'
     )
     parser.add_argument(
+        '--colbert_freeze_weights',
+        action='store_true',
+        help='Freeze ColBERT weights (only train scoring layer)'
+    )
+    parser.add_argument(
         '--bert_version',
         type=str,
         default='tiny',
@@ -220,6 +225,7 @@ class NRMSbertConfig:
     colbert_max_doc_tokens: int = 128
     colbert_enable_caching: bool = False
     colbert_cache_size: int = 10000
+    colbert_freeze_weights: bool = False
     query_vector_dim: int = 200
     num_epochs: int = 100
     num_batches_show_loss: int = 100
@@ -321,6 +327,7 @@ def create_config() -> NRMSbertConfig:
         colbert_max_doc_tokens=args.colbert_max_doc_tokens,
         colbert_enable_caching=args.colbert_enable_caching,
         colbert_cache_size=args.colbert_cache_size,
+        colbert_freeze_weights=args.colbert_freeze_weights,
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         dropout_probability=args.dropout_probability,
