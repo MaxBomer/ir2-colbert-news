@@ -141,6 +141,9 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
             # But we have scalar scores here.
             # Let's implement "Score Attention": alpha_i = softmax(W * S_i + b)
             self.attention_linear = nn.Linear(1, 1)
+            # Initialize with small weights to start close to Mean Aggregation (uniform attention)
+            nn.init.zeros_(self.attention_linear.weight)
+            nn.init.zeros_(self.attention_linear.bias)
             
     def _token_ids_to_text(self, input_ids: torch.Tensor) -> List[str]:
         """Convert token IDs back to text. (Legacy - slow)"""
