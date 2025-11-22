@@ -337,7 +337,7 @@ def setup_training_context(cfg: NRMSbertConfig) -> TrainingContext:
     # Setup training components
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
-    early_stopping = EarlyStopping(patience=5)
+    early_stopping = EarlyStopping(patience=20)
     
     return TrainingContext(
         config=cfg,
