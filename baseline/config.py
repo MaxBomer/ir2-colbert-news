@@ -63,27 +63,30 @@ def parse_args() -> argparse.Namespace:
         help='Maximum number of tokens for document encoding (default: 128)'
     )
     parser.add_argument(
-        '--colbert_enable_caching',
-        action='store_true',
-        help='Enable caching of news embeddings (default: False)'
-    )
-    parser.add_argument(
-        '--colbert_cache_size',
-        type=int,
-        default=10000,
-        help='Maximum number of cached embeddings (default: 10000)'
-    )
-    parser.add_argument(
         '--colbert_freeze_weights',
         action='store_true',
-        help='Freeze ColBERT weights (only train scoring layer)'
+        help='Freeze ColBERT weights (zero-shot mode)'
     )
     parser.add_argument(
-        '--colbert_aggregation',
-        type=str,
-        default='max',
-        choices=['max', 'mean', 'attention'],
-        help='Aggregation method for user history (max, mean, attention)'
+        '--colbert_user_attention',
+        action='store_true',
+        help='Enable cross-article self-attention over user tokens (default: False)'
+    )
+    parser.add_argument(
+        '--colbert_position_embeddings',
+        action='store_true',
+        help='Add article position embeddings before attention (default: False)'
+    )
+    parser.add_argument(
+        '--colbert_hierarchical_attention',
+        action='store_true',
+        help='Enable hierarchical attention: token-level + article-level (default: False)'
+    )
+    parser.add_argument(
+        '--colbert_attention_heads',
+        type=int,
+        default=8,
+        help='Number of attention heads for ColBERT user attention (default: 8)'
     )
     parser.add_argument(
         '--bert_version',
@@ -230,10 +233,11 @@ class NRMSbertConfig:
     colbert_embedding_dim: int | None = None
     colbert_max_query_tokens: int = 32
     colbert_max_doc_tokens: int = 128
-    colbert_enable_caching: bool = False
-    colbert_cache_size: int = 10000
     colbert_freeze_weights: bool = False
-    colbert_aggregation: str = 'max'  # 'max', 'mean', or 'attention'
+    colbert_user_attention: bool = False  # Cross-article self-attention
+    colbert_position_embeddings: bool = False  # Article position embeddings
+    colbert_hierarchical_attention: bool = False  # Token + article level attention
+    colbert_attention_heads: int = 8  # Attention heads when enabled
     query_vector_dim: int = 200
     num_epochs: int = 100
     num_batches_show_loss: int = 100
@@ -333,10 +337,11 @@ def create_config() -> NRMSbertConfig:
         colbert_embedding_dim=args.colbert_embedding_dim,
         colbert_max_query_tokens=args.colbert_max_query_tokens,
         colbert_max_doc_tokens=args.colbert_max_doc_tokens,
-        colbert_enable_caching=args.colbert_enable_caching,
-        colbert_cache_size=args.colbert_cache_size,
         colbert_freeze_weights=args.colbert_freeze_weights,
-        colbert_aggregation=args.colbert_aggregation,
+        colbert_user_attention=args.colbert_user_attention,
+        colbert_position_embeddings=args.colbert_position_embeddings,
+        colbert_hierarchical_attention=args.colbert_hierarchical_attention,
+        colbert_attention_heads=args.colbert_attention_heads,
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         dropout_probability=args.dropout_probability,
