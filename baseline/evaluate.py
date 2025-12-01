@@ -294,7 +294,10 @@ class BehaviorsDataset(Dataset):
 @dataclass
 class EvaluationConfig:
     """Configuration for evaluation."""
-    batch_size_multiplier: int = 16
+    # Reduced from 16 to 1 to prevent OOM with attention models
+    # Attention has O(n²) memory: batch × heads × seq² where seq = 50×tokens
+    # With multiplier=16 and batch=32: eval_batch=512 → 42GB for attention mask alone
+    batch_size_multiplier: int = 1
     max_count: int = sys.maxsize
 
 
