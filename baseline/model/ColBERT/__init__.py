@@ -250,11 +250,6 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
         """
         if not (self.use_user_attention or self.use_hierarchical_attention):
             return embeddings
-        
-        # Skip attention during inference to avoid OOM
-        # (evaluation uses doc_tokens=128 vs training query_tokens=32, causing 16x more memory)
-        if not self.training:
-            return embeddings
             
         batch_size = embeddings.shape[0]
         
