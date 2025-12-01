@@ -294,12 +294,11 @@ class BehaviorsDataset(Dataset):
 @dataclass
 class EvaluationConfig:
     """Configuration for evaluation."""
-    # Attention has O(n²) memory: batch × heads × seq² where seq = 50×tokens
-    # With doc_tokens=32, seq=1600:
-    #   multiplier=20 (batch=640): 640 × 8 × 1600² × 4 = 52 GB
-    #   + ~30 GB (model/news vectors) = ~82 GB total
-    # Maximizes H100 (93GB) utilization with ~11 GB headroom
-    batch_size_multiplier: int = 20
+    # Attention memory: batch × heads × seq² × 4 bytes (seq = 50 × 32 = 1600)
+    # Baseline memory ~66 GB (model + news vectors + attention mask + intermediates)
+    # Available: 93 - 66 = ~27 GB for attention scores
+    # multiplier=8 (batch=256): 256 × 8 × 1600² × 4 = 21 GB ✓ fits in 27 GB
+    batch_size_multiplier: int = 8
     max_count: int = sys.maxsize
 
 
