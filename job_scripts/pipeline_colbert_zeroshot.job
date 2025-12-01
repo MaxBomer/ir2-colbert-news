@@ -2,11 +2,11 @@
 
 #SBATCH --partition=gpu_h100
 #SBATCH --gpus=1
-#SBATCH --job-name=ColBERTZeroShot
+#SBATCH --job-name=ColBERTZero
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --time=4:00:00
-#SBATCH --output=./job_scripts/out/ColBERTZeroShot_%A.out
+#SBATCH --output=./job_scripts/out/ColBERTZero_%A.out
 
 module purge
 module load 2025
@@ -15,10 +15,6 @@ cd $HOME/ir2-colbert-news
 curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 uv sync --locked
-
-# pip uninstall -y torch torchvision torchaudio
-# pip install --index-url https://download.pytorch.org/whl/cu124 \
-#   torch==2.6.0 torchvision torchaudio
 
 uv run python - <<'EOF'
 import torch
@@ -38,13 +34,8 @@ fi
 if [ ! -f "data/tiny/train/behaviors_parsed.tsv" ]; then
     echo "Data not found at data/tiny/train/behaviors_parsed.tsv"
     echo "Running data download and setup..."
-    
-    # 1. Download and Setup (Raw -> Original)
-    # This script downloads MINDsmall and splits it into train/val/test in data/original
     srun uv run python baseline/download_and_setup_data.py --data_dir data/original
-    
     echo "Running data preprocessing..."
-    # This script processes text, tokenizes, and saves to data/tiny/train etc.
     srun uv run python baseline/data_preprocess.py --original_data_path data/original
 fi
 
@@ -52,8 +43,9 @@ export TOKENIZERS_PARALLELISM=false
 export MODEL_NAME=ColBERT
 export BERT_MODEL=prajjwal1/bert-tiny
 
-echo "Starting Zero-Shot (Frozen Weights) Training..."
-echo "Training only the scoring layer with LR=1e-3"
+echo "=== ColBERT Zero-Shot (Frozen Weights) ==="
+echo "Architecture: Flatten -> MaxSim (ColBERT weights frozen)"
+echo "Only training extension layers if enabled"
 
 srun uv run python baseline/train.py \
     --current_data_path data \
@@ -68,7 +60,6 @@ srun uv run python baseline/train.py \
     --num_epochs 10 \
     --dropout_probability 0.2
 
-# Evaluate after training
 srun uv run python baseline/evaluate.py \
     --current_data_path data \
     --model_type $MODEL_NAME \
@@ -78,4 +69,3 @@ srun uv run python baseline/evaluate.py \
     --colbert_max_doc_tokens 128 \
     --colbert_freeze_weights \
     --batch_size 256
-
