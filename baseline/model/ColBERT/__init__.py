@@ -391,13 +391,6 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
         """
         batch_size, num_clicked, num_tokens, dim = clicked_news_vector.shape
         
-        # DEBUG: Print actual dimensions to diagnose OOM
-        if not hasattr(self, '_debug_printed') or not self._debug_printed:
-            print(f"[DEBUG get_user_vector] batch={batch_size}, num_clicked={num_clicked}, num_tokens={num_tokens}, dim={dim}")
-            print(f"[DEBUG] Total seq for attention: {num_clicked * num_tokens}")
-            print(f"[DEBUG] Expected doc_tokens: {self.doc_tokens}")
-            self._debug_printed = True
-        
         # Flatten: [batch_size, num_clicked * num_tokens, dim]
         user_embeddings = clicked_news_vector.reshape(batch_size, -1, dim)
         
