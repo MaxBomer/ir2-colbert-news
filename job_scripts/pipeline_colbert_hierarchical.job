@@ -57,7 +57,7 @@ srun uv run python baseline/train.py \
     --colbert_hierarchical_attention \
     --colbert_attention_heads 8 \
     --learning_rate 5e-5 \
-    --batch_size 256 \
+    --batch_size 32 \
     --num_epochs 50 \
     --dropout_probability 0.2
 
@@ -70,5 +70,5 @@ srun uv run python baseline/evaluate.py \
     --colbert_max_doc_tokens 128 \
     --colbert_hierarchical_attention \
     --colbert_attention_heads 8 \
-    --batch_size 256
+    --batch_size 32
 
