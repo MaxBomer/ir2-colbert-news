@@ -296,9 +296,9 @@ class EvaluationConfig:
     """Configuration for evaluation."""
     # Attention has O(n²) memory: batch × heads × seq² where seq = 50×tokens
     # With doc_tokens=32, seq=1600:
-    #   multiplier=8 (batch=256): 256 × 8 × 1600² × 4 = 21 GB ✓
-    # Safe for H100 (93GB) with attention models
-    batch_size_multiplier: int = 8
+    #   multiplier=16 (batch=512): 512 × 8 × 1600² × 4 = 42 GB
+    # Maximizes H100 (93GB) utilization with ~50 GB headroom
+    batch_size_multiplier: int = 16
     max_count: int = sys.maxsize
 
 
