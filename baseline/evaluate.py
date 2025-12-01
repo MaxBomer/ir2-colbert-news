@@ -384,12 +384,13 @@ def compute_user_vectors(model: BaseNewsRecommendationModel, user_dataset: UserD
         user_strings = minibatch["clicked_news_string"]
         
         if any(user_string not in user2vector for user_string in user_strings):
+            # Stack: [batch_size, num_clicked, num_tokens, dim]
             clicked_news_vectors = torch.stack([
                 torch.stack([
                     news2vector[news_id].to(device) for news_id in news_list
                 ], dim=0)
                 for news_list in minibatch["clicked_news"]
-            ], dim=0).transpose(0, 1)
+            ], dim=0)
             
             user_vectors = model.get_user_vector(clicked_news_vectors)
             
