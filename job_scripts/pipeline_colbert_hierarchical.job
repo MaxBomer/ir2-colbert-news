@@ -41,7 +41,7 @@ fi
 
 export TOKENIZERS_PARALLELISM=false
 export MODEL_NAME=ColBERT
-export BERT_MODEL=prajjwal1/bert-tiny
+export BERT_MODEL=bert-base-uncased
 
 echo "=== ColBERT + Hierarchical Attention (Extension 3) ==="
 echo "Architecture: Flatten -> Token Attention -> Article Attention -> MaxSim"

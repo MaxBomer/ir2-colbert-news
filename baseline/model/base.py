@@ -13,12 +13,13 @@ class BaseNewsRecommendationModel(nn.Module, ABC):
     and evaluation pipelines.
     """
     
-    @abstractmethod
     def forward(
         self,
         candidate_news: List[Dict[str, torch.Tensor]],
         clicked_news: List[Dict[str, torch.Tensor]],
         clicked_news_mask: List[List[int]],
+        user: torch.Tensor | None = None,
+        clicked_news_length: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Forward pass for training.
         
@@ -26,11 +27,13 @@ class BaseNewsRecommendationModel(nn.Module, ABC):
             candidate_news: List of (1 + K) candidate news dictionaries
             clicked_news: List of clicked news dictionaries
             clicked_news_mask: List of mask lists indicating real vs padded news
+            user: User IDs (required for LSTUR models)
+            clicked_news_length: Actual clicked news length (required for LSTUR models)
                 
         Returns:
             Click probability tensor with shape [batch_size, 1 + K]
         """
-        pass
+        raise NotImplementedError("Subclasses must implement forward method")
     
     @abstractmethod
     def get_news_vector(self, news: Dict[str, torch.Tensor]) -> torch.Tensor:
@@ -44,17 +47,23 @@ class BaseNewsRecommendationModel(nn.Module, ABC):
         """
         pass
     
-    @abstractmethod
-    def get_user_vector(self, clicked_news_vector: torch.Tensor) -> torch.Tensor:
+    def get_user_vector(
+        self,
+        clicked_news_vector: torch.Tensor,
+        user: torch.Tensor | None = None,
+        clicked_news_length: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """Get user vector representation.
         
         Args:
             clicked_news_vector: Tensor with shape [batch_size, num_clicked_news_a_user, embedding_dim]
+            user: User IDs (required for LSTUR models)
+            clicked_news_length: Actual clicked news length (required for LSTUR models)
             
         Returns:
             User vector with shape [batch_size, embedding_dim]
         """
-        pass
+        raise NotImplementedError("Subclasses must implement get_user_vector method")
     
     @abstractmethod
     def get_prediction(

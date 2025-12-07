@@ -1,12 +1,12 @@
 #!/bin/bash
 
-#SBATCH --partition=gpu_h100
+#SBATCH --partition=gpu_a100
 #SBATCH --gpus=1
-#SBATCH --job-name=ColBERTAttn
+#SBATCH --job-name=NAMLPipeline
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --time=24:00:00
-#SBATCH --output=./job_scripts/out/ColBERTAttn_%A.out
+#SBATCH --output=./job_scripts/out/NAMLPipeline_%A.out
 
 module purge
 module load 2025
@@ -31,44 +31,45 @@ if [ -f .env ]; then
 fi
 
 # Check if data exists, if not run data setup and preprocessing
-if [ ! -f "data/tiny/train/behaviors_parsed.tsv" ]; then
-    echo "Data not found at data/tiny/train/behaviors_parsed.tsv"
+if [ ! -f "data/base/train/behaviors_parsed.tsv" ]; then
+    echo "Data not found at data/base/train/behaviors_parsed.tsv"
     echo "Running data download and setup..."
+    
+    # 1. Download and Setup (Raw -> Original)
     srun uv run python baseline/download_and_setup_data.py --data_dir data/original
+    
     echo "Running data preprocessing..."
-    srun uv run python baseline/data_preprocess.py --original_data_path data/original
+    # 2. Preprocess (Original -> Processed/Base)
+    srun uv run python baseline/data_preprocess.py --original_data_path data/original --bert_version base --pretrained_model_name bert-base-uncased
 fi
 
 export TOKENIZERS_PARALLELISM=false
-export MODEL_NAME=ColBERT
+export MODEL_NAME=NAMLbert
 export BERT_MODEL=bert-base-uncased
-
-echo "=== ColBERT + User Attention (Extension 1) ==="
-echo "Architecture: Flatten -> Self-Attention -> MaxSim"
-echo "This implements David's suggestion for cross-article token contextualization"
 
 srun uv run python baseline/train.py \
     --current_data_path data \
     --model_type $MODEL_NAME \
     --pretrained_model_name $BERT_MODEL \
-    --colbert_embedding_dim 128 \
-    --colbert_max_query_tokens 32 \
-    --colbert_max_doc_tokens 32 \
-    --colbert_user_attention \
-    --colbert_attention_heads 8 \
-    --learning_rate 5e-5 \
+    --bert_version base \
+    --word_embedding_dim 768 \
+    --num_attention_heads 12 \
+    --finetune_layers 2 \
+    --num_filters 300 \
+    --window_size 3 \
+    --learning_rate 1e-4 \
     --batch_size 32 \
-    --num_epochs 50 \
-    --dropout_probability 0.2
+    --dropout_probability 0.1
 
 srun uv run python baseline/evaluate.py \
     --current_data_path data \
     --model_type $MODEL_NAME \
     --pretrained_model_name $BERT_MODEL \
-    --colbert_embedding_dim 128 \
-    --colbert_max_query_tokens 32 \
-    --colbert_max_doc_tokens 32 \
-    --colbert_user_attention \
-    --colbert_attention_heads 8 \
+    --bert_version base \
+    --word_embedding_dim 768 \
+    --num_attention_heads 12 \
+    --finetune_layers 2 \
+    --num_filters 300 \
+    --window_size 3 \
     --batch_size 32
 

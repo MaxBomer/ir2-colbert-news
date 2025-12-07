@@ -187,11 +187,19 @@ def train_step(ctx: TrainingContext, minibatch: dict) -> float:
         Loss value
     """
     # Forward pass
-    y_pred = ctx.model(
-        minibatch["candidate_news"],
-        minibatch["clicked_news"],
-        minibatch["clicked_news_mask"]
-    )
+    forward_kwargs = {
+        "candidate_news": minibatch["candidate_news"],
+        "clicked_news": minibatch["clicked_news"],
+        "clicked_news_mask": minibatch["clicked_news_mask"]
+    }
+    
+    # Add LSTUR-specific arguments if available
+    if "user" in minibatch:
+        forward_kwargs["user"] = minibatch["user"]
+    if "clicked_news_length" in minibatch:
+        forward_kwargs["clicked_news_length"] = minibatch["clicked_news_length"]
+    
+    y_pred = ctx.model(**forward_kwargs)
     
     # Compute loss (first item is positive, rest are negative)
     y_true = torch.zeros(len(y_pred), dtype=torch.long, device=ctx.device)
@@ -313,7 +321,8 @@ def setup_training_context(cfg: NRMSbertConfig) -> TrainingContext:
     logger.info(f"Time elapsed: {time_since(start_time)}")
     train_dataset = BaseDataset(
         cfg.train_data_path / 'behaviors_parsed.tsv',
-        cfg.train_data_path / 'news_parsed.tsv'
+        cfg.train_data_path / 'news_parsed.tsv',
+        category2int_path=cfg.train_data_path / 'category2int.tsv'
     )
     dataset_size = len(train_dataset)
     batches_per_epoch = dataset_size // cfg.batch_size
@@ -323,7 +332,11 @@ def setup_training_context(cfg: NRMSbertConfig) -> TrainingContext:
     
     logger.info("Loading validation data...")
     logger.info(f"Time elapsed: {time_since(start_time)}")
-    val_dataset = NewsDataset(cfg.val_data_path / 'news_parsed.tsv')
+    category2int_path = cfg.train_data_path / 'category2int.tsv'
+    val_dataset = NewsDataset(
+        cfg.val_data_path / 'news_parsed.tsv',
+        category2int_path=category2int_path if category2int_path.exists() else None
+    )
     logger.info("Finished loading validation data.")
     logger.info(f"Time elapsed: {time_since(start_time)}")
     

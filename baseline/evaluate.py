@@ -116,6 +116,21 @@ def calculate_single_user_metric(pair: Tuple[List[int], List[float]]) -> List[fl
         return [np.nan] * 4
 
 
+def _parse_tokenized_text(text_str: str) -> torch.Tensor:
+    """Parse tokenized text string to tensor.
+    
+    Args:
+        text_str: String representation of tokenized text
+        
+    Returns:
+        Tensor with shape [2, num_words] containing input_ids and attention_mask
+    """
+    text_dict = ast.literal_eval(text_str)
+    input_ids = torch.tensor(text_dict['input_ids'])
+    attention_mask = torch.tensor(text_dict['attention_mask'])
+    return torch.cat([input_ids.unsqueeze(0), attention_mask.unsqueeze(0)], dim=0)
+
+
 def _parse_tokenized_title(title_str: str) -> torch.Tensor:
     """Parse tokenized title string to tensor.
     
@@ -134,11 +149,12 @@ def _parse_tokenized_title(title_str: str) -> torch.Tensor:
 class NewsDataset(Dataset):
     """Dataset for loading news articles during evaluation."""
     
-    def __init__(self, news_path: Path | str) -> None:
+    def __init__(self, news_path: Path | str, category2int_path: Path | str | None = None) -> None:
         """Initialize news dataset.
         
         Args:
             news_path: Path to parsed news TSV file
+            category2int_path: Path to category2int mapping file
         """
         super().__init__()
         
@@ -149,19 +165,50 @@ class NewsDataset(Dataset):
         if not Path(news_path_str).exists():
             raise FileNotFoundError(f"News file not found: {news_path_str}")
         
+        # Load category2int mapping if available
+        self.category2int: Dict[str, int] = {}
+        if category2int_path and Path(category2int_path).exists():
+            cat_df = pd.read_table(category2int_path, sep='\t')
+            self.category2int = dict(cat_df.values)
+        
+        # Load news columns based on config
+        news_cols = ['id', 'title']
+        converters = {'title': literal_eval}
+        
+        if 'category' in config.dataset_attributes.get('news', []):
+            news_cols.append('category')
+        if 'subcategory' in config.dataset_attributes.get('news', []):
+            news_cols.append('subcategory')
+        if 'abstract' in config.dataset_attributes.get('news', []):
+            news_cols.append('abstract')
+            converters['abstract'] = literal_eval
+        
         self.news_parsed = pd.read_table(
             news_path_str,
             sep='\t',
-            usecols=['id', 'title'],
-            converters={'title': literal_eval}
+            usecols=news_cols,
+            converters=converters
         )
         
         self.news2dict: Dict[int, Dict[str, torch.Tensor]] = {}
         for idx, (_, row) in enumerate(self.news_parsed.iterrows()):
-            self.news2dict[idx] = {
+            news_dict: Dict[str, torch.Tensor] = {
                 'id': row['id'],
                 'title': _parse_tokenized_title(str(row['title']))
             }
+            
+            if 'category' in row:
+                cat_val = str(row['category']).strip()
+                news_dict['category'] = torch.tensor(self.category2int.get(cat_val, 0), dtype=torch.long)
+            
+            if 'subcategory' in row:
+                subcat_val = str(row['subcategory']).strip()
+                news_dict['subcategory'] = torch.tensor(self.category2int.get(subcat_val, 0), dtype=torch.long)
+            
+            if 'abstract' in row:
+                news_dict['abstract'] = _parse_tokenized_text(str(row['abstract']))
+            
+            self.news2dict[idx] = news_dict
     
     def __len__(self) -> int:
         """Return dataset size."""
@@ -234,10 +281,19 @@ class UserDataset(Dataset):
         repeated_times = config.num_clicked_news_a_user - len(clicked_news)
         assert repeated_times >= 0
         
-        return {
+        result = {
             "clicked_news_string": row.clicked_news,
             "clicked_news": ['PADDED_NEWS'] * repeated_times + clicked_news,
         }
+        
+        # Add LSTUR-specific fields if needed
+        if 'user' in config.dataset_attributes.get('record', []):
+            result['user'] = row.user
+        
+        # Note: clicked_news_length is calculated in compute_user_vectors
+        # where we can check which news IDs actually exist in news2vector
+        
+        return result
 
 
 class BehaviorsDataset(Dataset):
@@ -331,16 +387,25 @@ def compute_news_vectors(model: BaseNewsRecommendationModel, news_dataset: NewsD
         # DataLoader automatically stacks tensors when batching, so check if title is already a tensor
         if isinstance(minibatch['id'], (list, tuple)):
             news_ids = list(minibatch['id'])
-            # If title is already a tensor (batched), use it directly; otherwise stack
-            if isinstance(minibatch['title'], torch.Tensor):
-                titles = minibatch['title']
-            else:
-                titles = torch.stack(minibatch['title'])
+            is_batch = True
         else:
             news_ids = [minibatch['id']]
-            titles = minibatch['title'].unsqueeze(0)
+            is_batch = False
         
-        batch_dict = {'title': titles}
+        # Build batch_dict with all available fields
+        batch_dict = {}
+        for field in ['title', 'abstract', 'category', 'subcategory']:
+            if field in minibatch:
+                if is_batch:
+                    if isinstance(minibatch[field], torch.Tensor):
+                        batch_dict[field] = minibatch[field]
+                    else:
+                        batch_dict[field] = torch.stack(minibatch[field])
+                else:
+                    if isinstance(minibatch[field], torch.Tensor):
+                        batch_dict[field] = minibatch[field].unsqueeze(0)
+                    else:
+                        batch_dict[field] = torch.tensor([minibatch[field]])
         
         if any(news_id not in news2vector for news_id in news_ids):
             news_vectors = model.get_news_vector(batch_dict)
@@ -399,7 +464,30 @@ def compute_user_vectors(model: BaseNewsRecommendationModel, user_dataset: UserD
                 for news_list in minibatch["clicked_news"]
             ], dim=0).transpose(0, 1)
             
-            user_vectors = model.get_user_vector(clicked_news_vectors)
+            # Prepare get_user_vector arguments
+            get_user_kwargs = {"clicked_news_vector": clicked_news_vectors}
+            
+            # Add LSTUR-specific arguments if available
+            if 'user' in minibatch:
+                get_user_kwargs['user'] = torch.tensor(minibatch['user'], dtype=torch.long).to(device)
+            
+            # Calculate clicked_news_length based on actual news existence in news2vector
+            # This is consistent with training (dataset.py) which counts only found news
+            if 'clicked_news_length' in config.dataset_attributes.get('record', []):
+                # minibatch["clicked_news"] is [num_clicked][batch] - list of positions
+                # We need to count per-batch how many news IDs actually exist (not PADDED_NEWS)
+                batch_lengths = []
+                for batch_idx in range(len(minibatch["clicked_news"][0])):
+                    count = sum(
+                        1 for position in minibatch["clicked_news"]
+                        if position[batch_idx] in news2vector and position[batch_idx] != 'PADDED_NEWS'
+                    )
+                    batch_lengths.append(count)
+                get_user_kwargs['clicked_news_length'] = torch.tensor(
+                    batch_lengths, dtype=torch.long
+                ).to(device)
+            
+            user_vectors = model.get_user_vector(**get_user_kwargs)
             
             for user_string, vector in zip(user_strings, user_vectors):
                 if user_string not in user2vector:
@@ -436,7 +524,12 @@ def evaluate(model: BaseNewsRecommendationModel, params: EvaluationParams) -> Tu
     if params.news_dataset_built is not None:
         news_dataset = params.news_dataset_built
     else:
-        news_dataset = NewsDataset(directory / 'news_parsed.tsv')
+        # Find category2int path (should be in train directory)
+        category2int_path = config.train_data_path / 'category2int.tsv'
+        news_dataset = NewsDataset(
+            directory / 'news_parsed.tsv',
+            category2int_path=category2int_path if category2int_path.exists() else None
+        )
     
     # Compute news vectors
     news2vector = compute_news_vectors(model, news_dataset, device, eval_config)

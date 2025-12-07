@@ -29,8 +29,8 @@ def parse_args() -> argparse.Namespace:
         '--model_type',
         type=str,
         default='NRMSbert',
-        choices=['NRMSbert', 'ColBERT'],
-        help='Model type: NRMSbert or ColBERT'
+        choices=['NRMSbert', 'NAMLbert', 'LSTURbert', 'ColBERT', 'ColBERT-NAML', 'ColBERT-LSTUR'],
+        help='Model type: NRMSbert, NAMLbert, LSTURbert, ColBERT, ColBERT-NAML, or ColBERT-LSTUR'
     )
     parser.add_argument(
         '--pretrained_model_name',
@@ -87,6 +87,44 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=8,
         help='Number of attention heads for ColBERT user attention (default: 8)'
+    )
+    parser.add_argument(
+        '--colbert_variant',
+        type=str,
+        default='nrms',
+        choices=['nrms', 'naml', 'lstur'],
+        help='ColBERT variant: nrms (multi-head attention), naml (additive attention), lstur (GRU)'
+    )
+    parser.add_argument(
+        '--num_filters',
+        type=int,
+        default=300,
+        help='Number of filters for CNN layers (NAML/LSTUR, default: 300)'
+    )
+    parser.add_argument(
+        '--window_size',
+        type=int,
+        default=3,
+        help='CNN window size (NAML/LSTUR, default: 3)'
+    )
+    parser.add_argument(
+        '--long_short_term_method',
+        type=str,
+        default='ini',
+        choices=['ini', 'con'],
+        help='LSTUR method: ini (initialization) or con (concatenation)'
+    )
+    parser.add_argument(
+        '--masking_probability',
+        type=float,
+        default=0.5,
+        help='Masking probability for LSTUR user embedding dropout (default: 0.5)'
+    )
+    parser.add_argument(
+        '--category_embedding_dim',
+        type=int,
+        default=100,
+        help='Category embedding dimension (NAML/LSTUR, default: 100)'
     )
     parser.add_argument(
         '--bert_version',
@@ -248,11 +286,30 @@ class NRMSbertConfig:
     num_words_abstract: int = 50
     dataset_attributes: Optional[Dict[str, List[str]]] = None
     seed: int = 2024
+    # NAML/LSTUR specific parameters
+    num_filters: int = 300
+    window_size: int = 3
+    long_short_term_method: str = 'ini'
+    masking_probability: float = 0.5
+    category_embedding_dim: int = 100
+    colbert_variant: str = 'nrms'
     
     def __post_init__(self) -> None:
         """Initialize dataset_attributes after object creation."""
         if self.dataset_attributes is None:
-            self.dataset_attributes = {"news": ["title"], "record": []}
+            # Set dataset_attributes based on model type
+            if self.model_type in ['NAMLbert', 'ColBERT-NAML']:
+                self.dataset_attributes = {
+                    "news": ["category", "subcategory", "title", "abstract"],
+                    "record": []
+                }
+            elif self.model_type in ['LSTURbert', 'ColBERT-LSTUR']:
+                self.dataset_attributes = {
+                    "news": ["category", "subcategory", "title"],
+                    "record": ["user", "clicked_news_length"]
+                }
+            else:  # NRMSbert, ColBERT
+                self.dataset_attributes = {"news": ["title"], "record": []}
         
         # Convert string paths to Path objects
         if isinstance(self.current_data_path, str):
@@ -342,6 +399,12 @@ def create_config() -> NRMSbertConfig:
         colbert_position_embeddings=args.colbert_position_embeddings,
         colbert_hierarchical_attention=args.colbert_hierarchical_attention,
         colbert_attention_heads=args.colbert_attention_heads,
+        colbert_variant=args.colbert_variant,
+        num_filters=args.num_filters,
+        window_size=args.window_size,
+        long_short_term_method=args.long_short_term_method,
+        masking_probability=args.masking_probability,
+        category_embedding_dim=args.category_embedding_dim,
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         dropout_probability=args.dropout_probability,

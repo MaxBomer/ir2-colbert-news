@@ -1,4 +1,4 @@
-"""NRMSbert model implementation."""
+"""NAMLbert model implementation with multi-view learning."""
 import numpy as np
 import torch
 import torch.nn as nn
@@ -6,19 +6,19 @@ import torch.nn as nn
 from config import NRMSbertConfig
 from model.base import BaseNewsRecommendationModel
 from model.general.click_predictor.dot_product import DotProductClickPredictor
-from model.NRMSbert.news_encoder import NewsEncoder
-from model.NRMSbert.user_encoder import UserEncoder
+from model.NAMLbert.news_encoder import NewsEncoder
+from model.NAMLbert.user_encoder import UserEncoder
 
 
-class NRMSbert(BaseNewsRecommendationModel):
-    """Neural News Recommendation with Multi-Head Self-Attention using BERT.
+class NAMLbert(BaseNewsRecommendationModel):
+    """Neural News Recommendation with Attentive Multi-View Learning using BERT.
     
-    Takes 1 + K candidate news and a list of user clicked news,
-    produces click probability for each candidate.
+    Uses multi-view learning with title, abstract, category, and subcategory.
+    User representation uses additive attention over clicked news.
     """
     
     def __init__(self, config: NRMSbertConfig) -> None:
-        """Initialize NRMSbert model.
+        """Initialize NAMLbert model.
         
         Args:
             config: Configuration object
@@ -41,35 +41,32 @@ class NRMSbert(BaseNewsRecommendationModel):
         
         Args:
             candidate_news: List of (1 + K) candidate news dictionaries
-                Each dict contains "title" tensor with shape [batch_size, 2, num_words_title]
+                Each dict contains "title", "abstract", "category", "subcategory" tensors
             clicked_news: List of clicked news dictionaries
-                Each dict contains "title" tensor with shape [batch_size, 2, num_words_title]
             clicked_news_mask: List of mask lists indicating real vs padded news
-                Each inner list has length num_clicked_news_a_user (0 for padding, 1 for real)
                 
         Returns:
             Click probability tensor with shape [batch_size, 1 + K]
         """
         device = next(self.parameters()).device
         
-        # Encode candidate news: [batch_size, 1 + K, word_embedding_dim]
+        # Encode candidate news: [batch_size, 1 + K, num_filters]
         candidate_news_vector = torch.stack(
             [self.news_encoder(x) for x in candidate_news], dim=1
         )
         
-        # Encode clicked news: [batch_size, num_clicked_news_a_user, word_embedding_dim]
+        # Encode clicked news: [batch_size, num_clicked_news_a_user, num_filters]
         clicked_news_vector = torch.stack(
             [self.news_encoder(x) for x in clicked_news], dim=1
         )
         
         # Apply mask to clicked news vectors
-        # Convert to numpy first to handle any mixed types from DataLoader batching
         clicked_news_mask_array = np.array(clicked_news_mask, dtype=np.float32)
-        clicked_news_mask_tensor = torch.from_numpy(clicked_news_mask_array).to(device).transpose(0, 1)  # [batch_size, num_clicked_news_a_user]
-        expanded_mask = clicked_news_mask_tensor.unsqueeze(-1)  # [batch_size, num_clicked_news_a_user, 1]
+        clicked_news_mask_tensor = torch.from_numpy(clicked_news_mask_array).to(device).transpose(0, 1)
+        expanded_mask = clicked_news_mask_tensor.unsqueeze(-1)
         clicked_news_vector = clicked_news_vector * expanded_mask
         
-        # Encode user: [batch_size, word_embedding_dim]
+        # Encode user: [batch_size, num_filters]
         user_vector = self.user_encoder(clicked_news_vector)
         
         # Predict click probability: [batch_size, 1 + K]
@@ -81,10 +78,10 @@ class NRMSbert(BaseNewsRecommendationModel):
         """Get news vector representation.
         
         Args:
-            news: Dictionary containing "title" tensor with shape [batch_size, 2, num_words_title]
+            news: Dictionary containing news attributes
             
         Returns:
-            News vector with shape [batch_size, word_embedding_dim]
+            News vector with shape [batch_size, num_filters]
         """
         return self.news_encoder(news)
     
@@ -97,12 +94,12 @@ class NRMSbert(BaseNewsRecommendationModel):
         """Get user vector representation.
         
         Args:
-            clicked_news_vector: Tensor with shape [batch_size, num_clicked_news_a_user, word_embedding_dim]
-            user: User IDs (not used by NRMS, for interface compatibility)
-            clicked_news_length: Actual clicked news length (not used by NRMS, for interface compatibility)
+            clicked_news_vector: Tensor with shape [batch_size, num_clicked_news_a_user, num_filters]
+            user: User IDs (not used by NAML, for interface compatibility)
+            clicked_news_length: Actual clicked news length (not used by NAML, for interface compatibility)
             
         Returns:
-            User vector with shape [batch_size, word_embedding_dim]
+            User vector with shape [batch_size, num_filters]
         """
         return self.user_encoder(clicked_news_vector)
     
@@ -112,8 +109,8 @@ class NRMSbert(BaseNewsRecommendationModel):
         """Get click prediction for a single user and news candidates.
         
         Args:
-            news_vector: Tensor with shape [candidate_size, word_embedding_dim]
-            user_vector: Tensor with shape [word_embedding_dim]
+            news_vector: Tensor with shape [candidate_size, num_filters]
+            user_vector: Tensor with shape [num_filters]
             
         Returns:
             Click probability tensor with shape [candidate_size]
@@ -122,3 +119,4 @@ class NRMSbert(BaseNewsRecommendationModel):
             news_vector.unsqueeze(dim=0),
             user_vector.unsqueeze(dim=0)
         ).squeeze(dim=0)
+

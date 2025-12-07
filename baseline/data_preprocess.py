@@ -160,11 +160,16 @@ def parse_behaviors(source: Path, target: Path, user2int_path: Path, negative_sa
         ).tolist()
     )
     
+    # Calculate clicked_news_length (capped to num_clicked_news_a_user)
+    behaviors['clicked_news_length'] = behaviors['clicked_news'].apply(
+        lambda x: min(len([n for n in x.split() if n.strip()]), config.num_clicked_news_a_user)
+    )
+    
     behaviors.to_csv(
         target,
         sep='\t',
         index=False,
-        columns=['user', 'clicked_news', 'candidate_news', 'clicked']
+        columns=['user', 'clicked_news', 'candidate_news', 'clicked', 'clicked_news_length']
     )
     
     return user2int
@@ -197,36 +202,48 @@ def parse_news(
     
     logger.info(f"Parsing news from: {source_str}")
     
-    # Read only id and title columns (NRMS only needs title)
+    # Read all columns: id, category, subcategory, title, abstract
+    # MIND format: news_id, category, subcategory, title, abstract, url, title_entities, abstract_entities
     news = pd.read_table(
         source_str,
         sep='\t',
         header=None,
-        usecols=[0, 3],  # id and title
+        usecols=[0, 1, 2, 3, 4],  # id, category, subcategory, title, abstract
         quoting=csv.QUOTE_NONE,
-        names=['id', 'title']
+        names=['id', 'category', 'subcategory', 'title', 'abstract']
     )
     news.fillna(' ', inplace=True)
 
-    def tokenize_title(title: str) -> Dict[str, list]:
-        """Tokenize a single title."""
+    def tokenize_text(text: str, max_length: int) -> Dict[str, list]:
+        """Tokenize text."""
         return tokenizer(
-            title.lower(),
-            max_length=num_words_title,
+            text.lower(),
+            max_length=max_length,
             padding='max_length',
             truncation=True
         )
 
-    # Tokenize titles
+    # Tokenize title and abstract
     parsed_news = news.copy()
-    parsed_news['title'] = parsed_news['title'].apply(tokenize_title)
+    parsed_news['title'] = parsed_news['title'].apply(
+        lambda x: tokenize_text(x, num_words_title)
+    )
+    parsed_news['abstract'] = parsed_news['abstract'].apply(
+        lambda x: tokenize_text(x, config.num_words_abstract)
+    )
     
     target.parent.mkdir(parents=True, exist_ok=True)
     parsed_news.to_csv(target, sep='\t', index=False)
 
     if mode == 'train':
-        # Create minimal mappings for compatibility (not used by NRMS)
-        category2int: Dict[str, int] = {'default': 1}
+        # Create category2int mapping
+        all_categories = set(news['category'].unique()) | set(news['subcategory'].unique())
+        category2int: Dict[str, int] = {}
+        for cat in sorted(all_categories):
+            if cat not in category2int:
+                category2int[cat] = len(category2int) + 1
+        
+        # Create minimal mappings for word/entity (not used but kept for compatibility)
         word2int: Dict[str, int] = {'default': 1}
         entity2int: Dict[str, int] = {'default': 1}
         
