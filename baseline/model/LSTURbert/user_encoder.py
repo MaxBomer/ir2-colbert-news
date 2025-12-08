@@ -86,3 +86,4 @@ class UserEncoder(nn.Module):
             # Concatenate: [batch_size, num_filters * 3]
             return torch.cat([last_hidden.squeeze(dim=0), user], dim=1)
 
+

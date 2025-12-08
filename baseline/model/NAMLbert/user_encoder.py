@@ -32,3 +32,4 @@ class UserEncoder(nn.Module):
         """
         return self.additive_attention(clicked_news_vector)
 
+
