@@ -2,8 +2,6 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
 class ScaledDotProductAttention(nn.Module):
     def __init__(self, d_k: int) -> None:
         super(ScaledDotProductAttention, self).__init__()
@@ -55,9 +53,11 @@ class MultiHeadSelfAttention(nn.Module):
                                self.d_v).transpose(1, 2)
 
         if length is not None:
+            # Use same device as input tensor Q
+            input_device = Q.device
             maxlen = Q.size(1)
-            attn_mask = torch.arange(maxlen).to(device).expand(
-                batch_size, maxlen) < length.to(device).view(-1, 1)
+            attn_mask = torch.arange(maxlen, device=input_device).expand(
+                batch_size, maxlen) < length.to(input_device).view(-1, 1)
             attn_mask = attn_mask.unsqueeze(1).expand(batch_size, maxlen,
                                                       maxlen)
             attn_mask = attn_mask.unsqueeze(1).repeat(1,

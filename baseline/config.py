@@ -320,7 +320,33 @@ class NRMSbertConfig:
     @property
     def checkpoint_dir(self) -> Path:
         """Get checkpoint directory path."""
-        return self.current_data_path / 'checkpoint' / 'bert' / self.bert_version / self.model_type
+        base_path = self.current_data_path / 'checkpoint' / 'bert' / self.bert_version
+        
+        # For ColBERT models, add variant suffix to avoid checkpoint collisions
+        if self.model_type == 'ColBERT':
+            variant_suffix = self._get_colbert_variant_suffix()
+            if variant_suffix:
+                return base_path / f"{self.model_type}_{variant_suffix}"
+            else:
+                return base_path / self.model_type
+        elif self.model_type in ['ColBERT-NAML', 'ColBERT-LSTUR']:
+            # These already have variant in the name
+            return base_path / self.model_type
+        else:
+            return base_path / self.model_type
+    
+    def _get_colbert_variant_suffix(self) -> str:
+        """Get ColBERT variant suffix based on enabled features."""
+        if self.colbert_hierarchical_attention:
+            return 'hierarchical'
+        elif self.colbert_position_embeddings:
+            return 'position'
+        elif self.colbert_user_attention:
+            return 'attention'
+        elif self.colbert_freeze_weights:
+            return 'zeroshot'
+        else:
+            return ''  # Base ColBERT
     
     @property
     def train_data_path(self) -> Path:
@@ -337,6 +363,9 @@ class NRMSbertConfig:
         """Get test data path (processed data organized by bert_version)."""
         return self.current_data_path / self.bert_version / 'test'
 
+
+# Module-level flag to prevent repeated logging
+_config_values_loaded_logged = set()
 
 def load_config_values_from_json(current_data_path: Path, bert_version: str) -> Dict[str, int]:
     """Load config values from JSON file if it exists.
@@ -376,10 +405,13 @@ def create_config() -> NRMSbertConfig:
     num_entities = config_values.get('num_entities', args.num_entities)
     num_users = config_values.get('num_users', args.num_users)
     
-    # Log if we loaded from JSON
+    # Log if we loaded from JSON (only once per unique path to avoid spam)
     if config_values:
         config_json_path = current_data_path / args.bert_version / 'config_values.json'
-        print(f"Loaded config values from {config_json_path}")
+        path_str = str(config_json_path)
+        if path_str not in _config_values_loaded_logged:
+            print(f"Loaded config values from {config_json_path}")
+            _config_values_loaded_logged.add(path_str)
     
     return NRMSbertConfig(
         current_data_path=args.current_data_path,

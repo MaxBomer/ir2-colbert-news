@@ -74,11 +74,11 @@ class LSTURbert(BaseNewsRecommendationModel):
         # Get user embedding
         if self.config.long_short_term_method == 'ini':
             # Initialization: apply dropout to user embedding
-            user_emb = F.dropout2d(
-                self.user_embedding(user.to(device)).unsqueeze(dim=0),
+            user_emb = F.dropout(
+                self.user_embedding(user.to(device)),
                 p=self.config.masking_probability,
                 training=self.training
-            ).squeeze(dim=0)
+            )
         else:
             # Concatenation: no dropout
             user_emb = self.user_embedding(user.to(device))

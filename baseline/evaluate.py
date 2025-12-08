@@ -469,7 +469,11 @@ def compute_user_vectors(model: BaseNewsRecommendationModel, user_dataset: UserD
             
             # Add LSTUR-specific arguments if available
             if 'user' in minibatch:
-                get_user_kwargs['user'] = torch.tensor(minibatch['user'], dtype=torch.long).to(device)
+                # Use clone().detach() instead of torch.tensor() to avoid warning
+                if isinstance(minibatch['user'], torch.Tensor):
+                    get_user_kwargs['user'] = minibatch['user'].clone().detach().to(device)
+                else:
+                    get_user_kwargs['user'] = torch.tensor(minibatch['user'], dtype=torch.long).to(device)
             
             # Calculate clicked_news_length based on actual news existence in news2vector
             # This is consistent with training (dataset.py) which counts only found news
