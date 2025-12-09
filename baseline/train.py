@@ -365,6 +365,38 @@ def load_checkpoint(ctx: TrainingContext, checkpoint_path: Path) -> dict:
     return checkpoint
 
 
+def get_wandb_run_name(cfg: NRMSbertConfig) -> str:
+    """Generate unique wandb run name.
+    
+    Uses SLURM_JOB_NAME if available (set by SBATCH --job-name), otherwise
+    constructs name from model_type and variant suffix.
+    
+    Args:
+        cfg: Configuration object
+        
+    Returns:
+        Run name with timestamp suffix
+    """
+    # Check for SLURM job name first (most reliable - matches job script name)
+    slurm_job_name = os.environ.get('SLURM_JOB_NAME')
+    if slurm_job_name:
+        base_name = slurm_job_name
+    else:
+        # Fallback: construct from model_type + variant suffix
+        if cfg.model_type == 'ColBERT':
+            variant_suffix = cfg._get_colbert_variant_suffix()
+            if variant_suffix:
+                base_name = f"{cfg.model_type}{variant_suffix.capitalize()}"
+            else:
+                base_name = cfg.model_type
+        else:
+            base_name = cfg.model_type
+    
+    # Append human-readable timestamp
+    timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    return f"{base_name}-{timestamp}"
+
+
 def setup_training_context(cfg: NRMSbertConfig) -> TrainingContext:
     """Setup and initialize training context.
     
@@ -384,7 +416,7 @@ def setup_training_context(cfg: NRMSbertConfig) -> TrainingContext:
     if use_wandb:
         wandb.init(
             project="news-recommendation",
-            name=f"{cfg.model_type}-{datetime.datetime.now().isoformat()}",
+            name=get_wandb_run_name(cfg),
             config={
                 'model_type': cfg.model_type,
                 'learning_rate': cfg.learning_rate,
