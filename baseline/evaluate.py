@@ -657,7 +657,32 @@ if __name__ == '__main__':
     
     logger.info(f"Loading saved parameters from {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path)
-    model.load_state_dict(checkpoint['model_state_dict'])
+    
+    # Validate checkpoint architecture matches model
+    if 'config_flags' in checkpoint:
+        saved_flags = checkpoint['config_flags']
+        current_flags = {
+            'colbert_user_attention': getattr(config, 'colbert_user_attention', False),
+            'colbert_position_embeddings': getattr(config, 'colbert_position_embeddings', False),
+            'colbert_hierarchical_attention': getattr(config, 'colbert_hierarchical_attention', False),
+            'model_type': config.model_type,
+        }
+        if saved_flags != current_flags:
+            logger.error(f"Checkpoint architecture mismatch! Saved: {saved_flags}, Current: {current_flags}")
+            logger.error(f"Delete incompatible checkpoint: {checkpoint_path}")
+            sys.exit(1)
+        model.load_state_dict(checkpoint['model_state_dict'])
+    else:
+        # Legacy checkpoint without config_flags - handle gracefully
+        logger.warning(f"Legacy checkpoint without config_flags. Loading with strict=False...")
+        missing, unexpected = model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+        if unexpected:
+            logger.error(f"Unexpected keys in checkpoint (wrong model variant): {unexpected}")
+            logger.error(f"Delete incompatible checkpoint: {checkpoint_path}")
+            sys.exit(1)
+        if missing:
+            logger.warning(f"Missing keys in checkpoint (may be expected for new model): {missing}")
+    
     model.eval()
     
     # Evaluate on test set

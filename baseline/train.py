@@ -252,6 +252,13 @@ def save_checkpoint(ctx: TrainingContext, step: int, val_auc: float, checkpoint_
             'optimizer_state_dict': ctx.optimizer.state_dict(),
             'step': step,
             'val_auc': val_auc,
+            # Add config flags for validation
+            'config_flags': {
+                'colbert_user_attention': getattr(ctx.config, 'colbert_user_attention', False),
+                'colbert_position_embeddings': getattr(ctx.config, 'colbert_position_embeddings', False),
+                'colbert_hierarchical_attention': getattr(ctx.config, 'colbert_hierarchical_attention', False),
+                'model_type': ctx.config.model_type,
+            }
         },
         checkpoint_path
     )
