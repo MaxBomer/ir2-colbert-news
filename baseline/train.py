@@ -193,6 +193,10 @@ def count_parameters(model: nn.Module) -> Tuple[int, int]:
     
     logger.info(f"Total parameters: {total_params:,}")
     logger.info(f"Trainable parameters: {trainable_params:,}")
+    
+    if trainable_params == 0:
+        logger.warning("No trainable parameters! Running in inference-only mode (no gradient updates).")
+    
     return total_params, trainable_params
 
 
@@ -287,15 +291,20 @@ def train_step(ctx: TrainingContext, minibatch: dict, accumulation_step: int) ->
     if "clicked_news_length" in minibatch:
         forward_kwargs["clicked_news_length"] = minibatch["clicked_news_length"]
     
-    # Use AMP autocast if enabled
-    use_amp = ctx.config.use_amp and ctx.scaler is not None
+    # Use AMP autocast if enabled (only when we have trainable params)
+    has_trainable_params = any(p.requires_grad for p in ctx.model.parameters())
+    use_amp = ctx.config.use_amp and ctx.scaler is not None and has_trainable_params
     
-    with torch.cuda.amp.autocast(enabled=use_amp):
+    with torch.amp.autocast('cuda', enabled=use_amp):
         y_pred = ctx.model(**forward_kwargs)
         
         # Compute loss (first item is positive, rest are negative)
         y_true = torch.zeros(len(y_pred), dtype=torch.long, device=ctx.device)
         loss = ctx.criterion(y_pred, y_true)
+    
+    # Skip backward/optimizer if no trainable parameters (e.g., frozen model)
+    if not has_trainable_params:
+        return loss.item()
     
     # Scale loss for gradient accumulation
     grad_accum_steps = ctx.config.gradient_accumulation_steps
@@ -501,7 +510,7 @@ def setup_training_context(cfg: NRMSbertConfig) -> TrainingContext:
     # Setup AMP GradScaler if enabled
     scaler = None
     if cfg.use_amp:
-        scaler = torch.cuda.amp.GradScaler()
+        scaler = torch.amp.GradScaler('cuda')
         logger.info("AMP (Automatic Mixed Precision) enabled for reduced memory usage")
     
     return TrainingContext(
