@@ -414,9 +414,10 @@ def compute_news_vectors(model: BaseNewsRecommendationModel, news_dataset: NewsD
             
             for news_id, vector in zip(news_ids, news_vectors):
                 if news_id not in news2vector:
-                    news2vector[news_id] = vector
+                    # Store on CPU to free GPU memory for user vector computation
+                    news2vector[news_id] = vector.cpu()
     
-    # Add padding vector
+    # Add padding vector (also on CPU)
     if news2vector:
         padding_vector = torch.zeros_like(list(news2vector.values())[0])
         news2vector['PADDED_NEWS'] = padding_vector
@@ -501,7 +502,8 @@ def compute_user_vectors(model: BaseNewsRecommendationModel, user_dataset: UserD
             
             for user_string, vector in zip(user_strings, user_vectors):
                 if user_string not in user2vector:
-                    user2vector[user_string] = vector
+                    # Store on CPU to free GPU memory
+                    user2vector[user_string] = vector.cpu()
         
         # Clear GPU cache periodically for ColBERT models to prevent OOM
         if is_colbert and batch_idx > 0 and batch_idx % 4 == 0:
@@ -547,6 +549,9 @@ def evaluate(model: BaseNewsRecommendationModel, params: EvaluationParams) -> Tu
     
     # Compute news vectors
     news2vector = compute_news_vectors(model, news_dataset, device, eval_config)
+    
+    # Clear GPU cache after news vector computation (vectors now on CPU)
+    torch.cuda.empty_cache()
     
     # Load user dataset
     user_dataset = UserDataset(
