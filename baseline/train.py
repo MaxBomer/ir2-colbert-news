@@ -158,6 +158,7 @@ class TrainingContext:
     start_time: float
     early_stopping: 'EarlyStopping'
     use_wandb: bool = False
+    scaler: Optional[torch.cuda.amp.GradScaler] = None  # For AMP
     
     @property
     def batches_per_epoch(self) -> int:
@@ -262,12 +263,13 @@ def create_dataloader(dataset: BaseDataset, shuffle: bool = True) -> DataLoader:
     )
 
 
-def train_step(ctx: TrainingContext, minibatch: dict) -> float:
-    """Perform a single training step.
+def train_step(ctx: TrainingContext, minibatch: dict, accumulation_step: int) -> float:
+    """Perform a single training step with gradient accumulation and AMP support.
     
     Args:
         ctx: Training context
         minibatch: Batch of training data
+        accumulation_step: Current step within gradient accumulation (0 to N-1)
         
     Returns:
         Loss value
@@ -285,16 +287,35 @@ def train_step(ctx: TrainingContext, minibatch: dict) -> float:
     if "clicked_news_length" in minibatch:
         forward_kwargs["clicked_news_length"] = minibatch["clicked_news_length"]
     
-    y_pred = ctx.model(**forward_kwargs)
+    # Use AMP autocast if enabled
+    use_amp = ctx.config.use_amp and ctx.scaler is not None
     
-    # Compute loss (first item is positive, rest are negative)
-    y_true = torch.zeros(len(y_pred), dtype=torch.long, device=ctx.device)
-    loss = ctx.criterion(y_pred, y_true)
+    with torch.cuda.amp.autocast(enabled=use_amp):
+        y_pred = ctx.model(**forward_kwargs)
+        
+        # Compute loss (first item is positive, rest are negative)
+        y_true = torch.zeros(len(y_pred), dtype=torch.long, device=ctx.device)
+        loss = ctx.criterion(y_pred, y_true)
     
-    # Backward pass
-    ctx.optimizer.zero_grad()
-    loss.backward()
-    ctx.optimizer.step()
+    # Scale loss for gradient accumulation
+    grad_accum_steps = ctx.config.gradient_accumulation_steps
+    scaled_loss = loss / grad_accum_steps
+    
+    # Backward pass (accumulates gradients)
+    if use_amp:
+        ctx.scaler.scale(scaled_loss).backward()
+    else:
+        scaled_loss.backward()
+    
+    # Only step optimizer on last accumulation step
+    is_last_accum_step = (accumulation_step + 1) == grad_accum_steps
+    if is_last_accum_step:
+        if use_amp:
+            ctx.scaler.step(ctx.optimizer)
+            ctx.scaler.update()
+        else:
+            ctx.optimizer.step()
+        ctx.optimizer.zero_grad()
     
     return loss.item()
 
@@ -477,6 +498,12 @@ def setup_training_context(cfg: NRMSbertConfig) -> TrainingContext:
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
     early_stopping = EarlyStopping(patience=20)
     
+    # Setup AMP GradScaler if enabled
+    scaler = None
+    if cfg.use_amp:
+        scaler = torch.cuda.amp.GradScaler()
+        logger.info("AMP (Automatic Mixed Precision) enabled for reduced memory usage")
+    
     return TrainingContext(
         config=cfg,
         device=device,
@@ -488,7 +515,8 @@ def setup_training_context(cfg: NRMSbertConfig) -> TrainingContext:
         optimizer=optimizer,
         start_time=start_time,
         early_stopping=early_stopping,
-        use_wandb=use_wandb
+        use_wandb=use_wandb,
+        scaler=scaler
     )
 
 
@@ -522,7 +550,17 @@ def run_training_loop(ctx: TrainingContext) -> Tuple[int, Optional[Path], int]:
     logger.info("Starting training...")
     logger.info(f"Time elapsed: {time_since(ctx.start_time)}")
     
+    # Log gradient accumulation info
+    grad_accum_steps = ctx.config.gradient_accumulation_steps
+    if grad_accum_steps > 1:
+        effective_batch = ctx.config.batch_size * grad_accum_steps
+        logger.info(f"Gradient accumulation: {grad_accum_steps} steps, effective batch size: {effective_batch}")
+    
     dataloader_iter = iter(ctx.dataloader)
+    accumulation_step = 0
+    
+    # Zero gradients at start
+    ctx.optimizer.zero_grad()
     
     for batch_idx in progress:
         # Get next batch (recreate dataloader if exhausted)
@@ -539,9 +577,12 @@ def run_training_loop(ctx: TrainingContext) -> Tuple[int, Optional[Path], int]:
         
         step += 1
         
-        # Training step
-        loss = train_step(ctx, minibatch)
+        # Training step with gradient accumulation
+        loss = train_step(ctx, minibatch, accumulation_step)
         loss_history.append(loss)
+        
+        # Update accumulation counter
+        accumulation_step = (accumulation_step + 1) % grad_accum_steps
         
         # Logging
         log_training_progress(ctx, batch_idx, step, loss, loss_history)

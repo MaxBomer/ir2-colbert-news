@@ -68,6 +68,12 @@ def parse_args() -> argparse.Namespace:
         help='Freeze ColBERT weights (zero-shot mode)'
     )
     parser.add_argument(
+        '--colbert_encode_batch_size',
+        type=int,
+        default=512,
+        help='Batch size for ColBERT encoding (micro-batching to prevent OOM, default: 512)'
+    )
+    parser.add_argument(
         '--colbert_user_attention',
         action='store_true',
         help='Enable cross-article self-attention over user tokens (default: False)'
@@ -177,6 +183,19 @@ def parse_args() -> argparse.Namespace:
         help='Negative sampling ratio (K)'
     )
     
+    # Memory optimization parameters
+    parser.add_argument(
+        '--gradient_accumulation_steps',
+        type=int,
+        default=1,
+        help='Number of gradient accumulation steps (effective_batch = batch_size * steps, default: 1)'
+    )
+    parser.add_argument(
+        '--use_amp',
+        action='store_true',
+        help='Enable automatic mixed precision (fp16) training to reduce memory usage'
+    )
+    
     # Test/quick run parameters
     parser.add_argument(
         '--test_run',
@@ -259,6 +278,10 @@ class NRMSbertConfig:
     max_batches: Optional[int]
     max_validation_samples: int
     
+    # Memory optimization parameters (no defaults - must come first)
+    gradient_accumulation_steps: int
+    use_amp: bool
+    
     # Vocabulary sizes (no defaults - must come first)
     num_categories: int
     num_words: int
@@ -272,6 +295,7 @@ class NRMSbertConfig:
     colbert_max_query_tokens: int = 32
     colbert_max_doc_tokens: int = 128
     colbert_freeze_weights: bool = False
+    colbert_encode_batch_size: int = 512  # Micro-batch size for ColBERT encoding
     colbert_user_attention: bool = False  # Cross-article self-attention
     colbert_position_embeddings: bool = False  # Article position embeddings
     colbert_hierarchical_attention: bool = False  # Token + article level attention
@@ -427,6 +451,7 @@ def create_config() -> NRMSbertConfig:
         colbert_max_query_tokens=args.colbert_max_query_tokens,
         colbert_max_doc_tokens=args.colbert_max_doc_tokens,
         colbert_freeze_weights=args.colbert_freeze_weights,
+        colbert_encode_batch_size=args.colbert_encode_batch_size,
         colbert_user_attention=args.colbert_user_attention,
         colbert_position_embeddings=args.colbert_position_embeddings,
         colbert_hierarchical_attention=args.colbert_hierarchical_attention,
@@ -444,6 +469,8 @@ def create_config() -> NRMSbertConfig:
         test_run=args.test_run,
         max_batches=args.max_batches,
         max_validation_samples=args.max_validation_samples if not args.test_run else 100,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        use_amp=args.use_amp,
         num_epochs=args.num_epochs,
         num_categories=num_categories,
         num_words=num_words,

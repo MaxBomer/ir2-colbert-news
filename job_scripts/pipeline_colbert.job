@@ -57,7 +57,10 @@ srun uv run python baseline/train.py \
     --colbert_max_query_tokens 32 \
     --colbert_max_doc_tokens 128 \
     --learning_rate 5e-5 \
-    --batch_size 256 \
+    --batch_size 32 \
+    --gradient_accumulation_steps 8 \
+    --use_amp \
+    --colbert_encode_batch_size 256 \
     --num_epochs 50 \
     --dropout_probability 0.2
 
@@ -70,4 +73,5 @@ srun uv run python baseline/evaluate.py \
     --colbert_embedding_dim 128 \
     --colbert_max_query_tokens 32 \
     --colbert_max_doc_tokens 128 \
-    --batch_size 256
+    --colbert_encode_batch_size 256 \
+    --batch_size 64

@@ -62,6 +62,8 @@ srun uv run python baseline/train.py \
     --masking_probability 0.5 \
     --learning_rate 5e-5 \
     --batch_size 32 \
+    --use_amp \
+    --colbert_encode_batch_size 256 \
     --num_epochs 50 \
     --dropout_probability 0.2
 
@@ -78,6 +80,7 @@ srun uv run python baseline/evaluate.py \
     --window_size 3 \
     --long_short_term_method ini \
     --masking_probability 0.5 \
+    --colbert_encode_batch_size 256 \
     --batch_size 32
 
 

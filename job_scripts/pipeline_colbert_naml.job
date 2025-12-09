@@ -60,6 +60,8 @@ srun uv run python baseline/train.py \
     --window_size 3 \
     --learning_rate 5e-5 \
     --batch_size 32 \
+    --use_amp \
+    --colbert_encode_batch_size 256 \
     --num_epochs 50 \
     --dropout_probability 0.2
 
@@ -74,6 +76,7 @@ srun uv run python baseline/evaluate.py \
     --colbert_max_doc_tokens 32 \
     --num_filters 300 \
     --window_size 3 \
+    --colbert_encode_batch_size 256 \
     --batch_size 32
 
 

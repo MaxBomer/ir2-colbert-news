@@ -117,6 +117,7 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
         self.max_query_tokens = config.colbert_max_query_tokens
         self.max_doc_tokens = config.colbert_max_doc_tokens
         self.num_clicked = config.num_clicked_news_a_user
+        self.encode_batch_size = getattr(config, 'colbert_encode_batch_size', 512)
         
         # Config flags for extensions
         self.use_user_attention = getattr(config, 'colbert_user_attention', False)
@@ -183,6 +184,40 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
         features = self._process_input_ids(input_ids, attention_mask, is_query)
         outputs = self.colbert_model(features)
         return outputs["token_embeddings"]
+    
+    def _encode_ids_with_colbert_batched(
+        self, input_ids: torch.Tensor, attention_mask: torch.Tensor, is_query: bool
+    ) -> torch.Tensor:
+        """Get token embeddings from ColBERT with micro-batching to prevent OOM.
+        
+        Splits large inputs into smaller chunks, encodes each separately,
+        and concatenates results. This prevents OOM when encoding many sequences.
+        
+        Args:
+            input_ids: [total_sequences, seq_len]
+            attention_mask: [total_sequences, seq_len]
+            is_query: Whether these are query or document sequences
+            
+        Returns:
+            Token embeddings: [total_sequences, seq_len, dim]
+        """
+        total_sequences = input_ids.shape[0]
+        
+        # If small enough, encode directly
+        if total_sequences <= self.encode_batch_size:
+            return self._encode_ids_with_colbert(input_ids, attention_mask, is_query)
+        
+        # Split into chunks and encode
+        all_embeddings = []
+        for start_idx in range(0, total_sequences, self.encode_batch_size):
+            end_idx = min(start_idx + self.encode_batch_size, total_sequences)
+            chunk_ids = input_ids[start_idx:end_idx]
+            chunk_mask = attention_mask[start_idx:end_idx]
+            
+            chunk_embeddings = self._encode_ids_with_colbert(chunk_ids, chunk_mask, is_query)
+            all_embeddings.append(chunk_embeddings)
+        
+        return torch.cat(all_embeddings, dim=0)
     
     def _build_token_mask(
         self, article_mask: torch.Tensor, num_tokens: int
@@ -306,11 +341,11 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
         num_candidates = len(candidate_news)
         num_clicked = len(clicked_news)
         
-        # 1. Encode Candidates (Documents)
+        # 1. Encode Candidates (Documents) - using micro-batched encoding
         all_candidate_input_ids = torch.cat([x["title"][:, 0] for x in candidate_news], dim=0).to(device)
         all_candidate_mask = torch.cat([x["title"][:, 1] for x in candidate_news], dim=0).to(device)
         
-        candidate_token_embeddings = self._encode_ids_with_colbert(
+        candidate_token_embeddings = self._encode_ids_with_colbert_batched(
             all_candidate_input_ids, all_candidate_mask, is_query=False
         )
         
@@ -322,11 +357,11 @@ class ColBERTNewsRecommendationModel(BaseNewsRecommendationModel):
             .contiguous()
         )
         
-        # 2. Encode History (Queries)
+        # 2. Encode History (Queries) - using micro-batched encoding
         all_clicked_input_ids = torch.cat([x["title"][:, 0] for x in clicked_news], dim=0).to(device)
         all_clicked_mask = torch.cat([x["title"][:, 1] for x in clicked_news], dim=0).to(device)
         
-        clicked_token_embeddings = self._encode_ids_with_colbert(
+        clicked_token_embeddings = self._encode_ids_with_colbert_batched(
             all_clicked_input_ids, all_clicked_mask, is_query=True
         )
         

@@ -59,6 +59,7 @@ srun uv run python baseline/train.py \
     --window_size 3 \
     --learning_rate 1e-4 \
     --batch_size 32 \
+    --use_amp \
     --dropout_probability 0.1
 
 srun uv run python baseline/evaluate.py \
