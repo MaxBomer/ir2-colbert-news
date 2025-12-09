@@ -1,0 +1,58 @@
+#!/bin/bash
+
+#SBATCH --partition=gpu_a100
+#SBATCH --gpus=1
+#SBATCH --job-name=SetupEnv
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=9
+#SBATCH --time=02:00:00
+#SBATCH --output=./job_scripts/out/SetupEnv_%A.out
+
+module purge
+module load 2025
+
+cd $HOME/ir2-colbert-news
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+uv sync --locked
+
+if [ -f .env ]; then
+    export $(grep -v '^#' .env | xargs)
+fi
+
+echo "=== Environment Setup Job ==="
+echo "This job downloads models and data BEFORE training jobs start"
+
+# 1. Clear corrupted HuggingFace cache if detected
+HF_CACHE_DIR="$HOME/.cache/huggingface/hub/models--bert-base-uncased"
+if [ -d "$HF_CACHE_DIR" ]; then
+    CONFIG_FILE=$(find "$HF_CACHE_DIR" -name "config.json" -type f 2>/dev/null | head -1)
+    if [ -n "$CONFIG_FILE" ]; then
+        if ! python3 -c "import json; json.load(open('$CONFIG_FILE'))" 2>/dev/null; then
+            echo "Corrupted HuggingFace cache detected, clearing..."
+            rm -rf "$HF_CACHE_DIR"
+        fi
+    fi
+fi
+
+# 2. Pre-download bert-base-uncased model and tokenizer
+echo "Pre-downloading bert-base-uncased..."
+uv run python -c "
+from transformers import AutoModel, AutoTokenizer
+print('Downloading bert-base-uncased model...')
+AutoModel.from_pretrained('bert-base-uncased')
+print('Downloading bert-base-uncased tokenizer...')
+AutoTokenizer.from_pretrained('bert-base-uncased')
+print('Model download complete!')
+"
+
+# 3. Download and preprocess data if needed
+if [ ! -f "data/base/train/behaviors_parsed.tsv" ]; then
+    echo "Data not found, downloading and preprocessing..."
+    srun uv run python baseline/download_and_setup_data.py --data_dir data/original
+    srun uv run python baseline/data_preprocess.py --original_data_path data/original \
+        --bert_version base --pretrained_model_name bert-base-uncased
+fi
+
+echo "=== Setup Complete ==="
+
