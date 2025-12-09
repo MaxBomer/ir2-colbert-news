@@ -8,6 +8,9 @@
 #SBATCH --time=04:00:00
 #SBATCH --output=./job_scripts/out/TestAllModels_%A.out
 
+# Ensure pipeline exit codes propagate correctly (not masked by tee)
+set -o pipefail
+
 # Color codes for SLURM output log
 RED='\033[0;31m'
 GREEN='\033[0;32m'

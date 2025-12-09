@@ -31,12 +31,12 @@ if [ -f .env ]; then
 fi
 
 # Check if data exists, if not run data setup and preprocessing
-if [ ! -f "data/tiny/train/behaviors_parsed.tsv" ]; then
-    echo "Data not found at data/tiny/train/behaviors_parsed.tsv"
+if [ ! -f "data/base/train/behaviors_parsed.tsv" ]; then
+    echo "Data not found at data/base/train/behaviors_parsed.tsv"
     echo "Running data download and setup..."
     srun uv run python baseline/download_and_setup_data.py --data_dir data/original
     echo "Running data preprocessing..."
-    srun uv run python baseline/data_preprocess.py --original_data_path data/original
+    srun uv run python baseline/data_preprocess.py --original_data_path data/original --bert_version base --pretrained_model_name bert-base-uncased
 fi
 
 export TOKENIZERS_PARALLELISM=false
@@ -51,6 +51,8 @@ srun uv run python baseline/train.py \
     --current_data_path data \
     --model_type $MODEL_NAME \
     --pretrained_model_name $BERT_MODEL \
+    --bert_version base \
+    --word_embedding_dim 768 \
     --colbert_embedding_dim 128 \
     --colbert_max_query_tokens 32 \
     --colbert_max_doc_tokens 32 \
@@ -65,6 +67,8 @@ srun uv run python baseline/evaluate.py \
     --current_data_path data \
     --model_type $MODEL_NAME \
     --pretrained_model_name $BERT_MODEL \
+    --bert_version base \
+    --word_embedding_dim 768 \
     --colbert_embedding_dim 128 \
     --colbert_max_query_tokens 32 \
     --colbert_max_doc_tokens 32 \

@@ -36,6 +36,92 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def get_current_config_flags(cfg: NRMSbertConfig) -> dict:
+    """Get current config flags for checkpoint validation."""
+    return {
+        'colbert_user_attention': getattr(cfg, 'colbert_user_attention', False),
+        'colbert_position_embeddings': getattr(cfg, 'colbert_position_embeddings', False),
+        'colbert_hierarchical_attention': getattr(cfg, 'colbert_hierarchical_attention', False),
+        'model_type': cfg.model_type,
+    }
+
+
+def cleanup_incompatible_checkpoints(cfg: NRMSbertConfig) -> int:
+    """Remove incompatible checkpoints from checkpoint directory.
+    
+    This prevents issues where old checkpoints from different model variants
+    pollute the checkpoint directory and cause loading failures.
+    
+    Args:
+        cfg: Configuration object
+        
+    Returns:
+        Number of checkpoints removed
+    """
+    checkpoint_dir = cfg.checkpoint_dir
+    if not checkpoint_dir.exists():
+        return 0
+    
+    current_flags = get_current_config_flags(cfg)
+    removed_count = 0
+    
+    for ckpt_path in checkpoint_dir.glob('ckpt-*.pth'):
+        try:
+            checkpoint = torch.load(ckpt_path, map_location='cpu')
+            
+            # Check if checkpoint has config_flags
+            if 'config_flags' in checkpoint:
+                saved_flags = checkpoint['config_flags']
+                if saved_flags != current_flags:
+                    logger.warning(
+                        f"Removing incompatible checkpoint: {ckpt_path.name} "
+                        f"(saved: {saved_flags}, current: {current_flags})"
+                    )
+                    ckpt_path.unlink()
+                    removed_count += 1
+            else:
+                # Legacy checkpoint without config_flags - check by trying to detect architecture
+                # Look for keys that indicate specific variants
+                state_dict = checkpoint.get('model_state_dict', {})
+                has_token_attention = any('token_attention' in k for k in state_dict.keys())
+                has_position_emb = any('article_position_embeddings' in k for k in state_dict.keys())
+                has_article_attention = any('article_attention' in k for k in state_dict.keys())
+                
+                # Determine what variant the checkpoint is from
+                ckpt_has_attention = has_token_attention
+                ckpt_has_position = has_position_emb
+                ckpt_has_hierarchical = has_article_attention
+                
+                # Check compatibility
+                current_needs_attention = current_flags['colbert_user_attention'] or current_flags['colbert_hierarchical_attention']
+                current_needs_position = current_flags['colbert_position_embeddings']
+                current_needs_hierarchical = current_flags['colbert_hierarchical_attention']
+                
+                incompatible = (
+                    (ckpt_has_attention != current_needs_attention) or
+                    (ckpt_has_position != current_needs_position) or
+                    (ckpt_has_hierarchical != current_needs_hierarchical)
+                )
+                
+                if incompatible:
+                    logger.warning(
+                        f"Removing legacy incompatible checkpoint: {ckpt_path.name} "
+                        f"(has attention={ckpt_has_attention}, position={ckpt_has_position}, "
+                        f"hierarchical={ckpt_has_hierarchical})"
+                    )
+                    ckpt_path.unlink()
+                    removed_count += 1
+                    
+        except Exception as e:
+            logger.warning(f"Error checking checkpoint {ckpt_path}: {e}")
+            continue
+    
+    if removed_count > 0:
+        logger.info(f"Cleaned up {removed_count} incompatible checkpoint(s)")
+    
+    return removed_count
+
+
 def check_wandb_setup() -> bool:
     """Check if wandb is properly configured.
     
@@ -549,6 +635,9 @@ def run_validation(ctx: TrainingContext, batch_idx: int, step: int) -> Tuple[boo
 
 def train() -> None:
     """Main training function."""
+    # Clean up any incompatible checkpoints before starting
+    cleanup_incompatible_checkpoints(config)
+    
     ctx = setup_training_context(config)
     
     # Run training loop

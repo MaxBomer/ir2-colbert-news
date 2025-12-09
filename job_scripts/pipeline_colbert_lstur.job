@@ -51,6 +51,8 @@ srun uv run python baseline/train.py \
     --current_data_path data \
     --model_type $MODEL_NAME \
     --pretrained_model_name $BERT_MODEL \
+    --bert_version base \
+    --word_embedding_dim 768 \
     --colbert_embedding_dim 128 \
     --colbert_max_query_tokens 32 \
     --colbert_max_doc_tokens 32 \
@@ -67,6 +69,8 @@ srun uv run python baseline/evaluate.py \
     --current_data_path data \
     --model_type $MODEL_NAME \
     --pretrained_model_name $BERT_MODEL \
+    --bert_version base \
+    --word_embedding_dim 768 \
     --colbert_embedding_dim 128 \
     --colbert_max_query_tokens 32 \
     --colbert_max_doc_tokens 32 \
