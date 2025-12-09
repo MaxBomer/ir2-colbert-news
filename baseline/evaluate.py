@@ -437,9 +437,15 @@ def compute_user_vectors(model: BaseNewsRecommendationModel, user_dataset: UserD
     Returns:
         Dictionary mapping user strings to vectors
     """
+    # ColBERT models use token-level embeddings which are memory-intensive
+    # Reduce batch size to prevent OOM
+    is_colbert = hasattr(model, 'colbert_model')
+    base_batch_size = config.batch_size * eval_config.batch_size_multiplier
+    user_batch_size = max(8, base_batch_size // 4) if is_colbert else base_batch_size
+    
     user_dataloader = DataLoader(
         user_dataset,
-        batch_size=config.batch_size * eval_config.batch_size_multiplier,
+        batch_size=user_batch_size,
         shuffle=False,
         num_workers=config.num_workers,
         drop_last=False,
@@ -449,7 +455,7 @@ def compute_user_vectors(model: BaseNewsRecommendationModel, user_dataset: UserD
     user2vector: Dict[str, torch.Tensor] = {}
     progress = tqdm(user_dataloader, desc="Computing user vectors") if should_display_progress() else user_dataloader
     
-    for minibatch in progress:
+    for batch_idx, minibatch in enumerate(progress):
         user_strings = minibatch["clicked_news_string"]
         
         if any(user_string not in user2vector for user_string in user_strings):
@@ -496,6 +502,10 @@ def compute_user_vectors(model: BaseNewsRecommendationModel, user_dataset: UserD
             for user_string, vector in zip(user_strings, user_vectors):
                 if user_string not in user2vector:
                     user2vector[user_string] = vector
+        
+        # Clear GPU cache periodically for ColBERT models to prevent OOM
+        if is_colbert and batch_idx > 0 and batch_idx % 4 == 0:
+            torch.cuda.empty_cache()
     
     return user2vector
 
@@ -649,39 +659,43 @@ if __name__ == '__main__':
     # Load model
     model = create_model(config).to(device)
     
-    # Find and load checkpoint
-    checkpoint_path = find_latest_checkpoint(config.checkpoint_dir)
-    if checkpoint_path is None:
-        logger.error('No checkpoint file found!')
-        sys.exit(1)
-    
-    logger.info(f"Loading saved parameters from {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path)
-    
-    # Validate checkpoint architecture matches model
-    if 'config_flags' in checkpoint:
-        saved_flags = checkpoint['config_flags']
-        current_flags = {
-            'colbert_user_attention': getattr(config, 'colbert_user_attention', False),
-            'colbert_position_embeddings': getattr(config, 'colbert_position_embeddings', False),
-            'colbert_hierarchical_attention': getattr(config, 'colbert_hierarchical_attention', False),
-            'model_type': config.model_type,
-        }
-        if saved_flags != current_flags:
-            logger.error(f"Checkpoint architecture mismatch! Saved: {saved_flags}, Current: {current_flags}")
-            logger.error(f"Delete incompatible checkpoint: {checkpoint_path}")
-            sys.exit(1)
-        model.load_state_dict(checkpoint['model_state_dict'])
+    # Skip checkpoint loading for zero-shot (frozen weights) mode
+    if getattr(config, 'colbert_freeze_weights', False):
+        logger.info("Zero-shot mode: using pretrained weights without checkpoint")
     else:
-        # Legacy checkpoint without config_flags - handle gracefully
-        logger.warning(f"Legacy checkpoint without config_flags. Loading with strict=False...")
-        missing, unexpected = model.load_state_dict(checkpoint['model_state_dict'], strict=False)
-        if unexpected:
-            logger.error(f"Unexpected keys in checkpoint (wrong model variant): {unexpected}")
-            logger.error(f"Delete incompatible checkpoint: {checkpoint_path}")
+        # Find and load checkpoint
+        checkpoint_path = find_latest_checkpoint(config.checkpoint_dir)
+        if checkpoint_path is None:
+            logger.error('No checkpoint file found!')
             sys.exit(1)
-        if missing:
-            logger.warning(f"Missing keys in checkpoint (may be expected for new model): {missing}")
+        
+        logger.info(f"Loading saved parameters from {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path)
+        
+        # Validate checkpoint architecture matches model
+        if 'config_flags' in checkpoint:
+            saved_flags = checkpoint['config_flags']
+            current_flags = {
+                'colbert_user_attention': getattr(config, 'colbert_user_attention', False),
+                'colbert_position_embeddings': getattr(config, 'colbert_position_embeddings', False),
+                'colbert_hierarchical_attention': getattr(config, 'colbert_hierarchical_attention', False),
+                'model_type': config.model_type,
+            }
+            if saved_flags != current_flags:
+                logger.error(f"Checkpoint architecture mismatch! Saved: {saved_flags}, Current: {current_flags}")
+                logger.error(f"Delete incompatible checkpoint: {checkpoint_path}")
+                sys.exit(1)
+            model.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            # Legacy checkpoint without config_flags - handle gracefully
+            logger.warning(f"Legacy checkpoint without config_flags. Loading with strict=False...")
+            missing, unexpected = model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+            if unexpected:
+                logger.error(f"Unexpected keys in checkpoint (wrong model variant): {unexpected}")
+                logger.error(f"Delete incompatible checkpoint: {checkpoint_path}")
+                sys.exit(1)
+            if missing:
+                logger.warning(f"Missing keys in checkpoint (may be expected for new model): {missing}")
     
     model.eval()
     
