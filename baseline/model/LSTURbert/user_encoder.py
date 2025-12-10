@@ -87,3 +87,5 @@ class UserEncoder(nn.Module):
             return torch.cat([last_hidden.squeeze(dim=0), user], dim=1)
 
 
+
+

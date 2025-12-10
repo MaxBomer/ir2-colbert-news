@@ -5,7 +5,7 @@
 #SBATCH --job-name=LSTURPipeline
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 #SBATCH --output=./job_scripts/out/LSTURPipeline_%A.out
 
 module purge
